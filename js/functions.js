@@ -1738,6 +1738,13 @@ const mapaMarkers = new Map(); // vehicle_id -> Leaflet marker
 let mapaVehiculosRows = [];
 let mapaVehiculosLastLoadedAt = null;
 let mapaRealtimeChannel = null;
+let mapaRealtimeRetryTimer = null;
+let mapaRealtimeRetryDelay = 1000;
+const MAPA_REALTIME_RETRY_MAX_MS = 30000;
+let mapaPollingTimer = null;
+const MAPA_POLLING_INTERVAL_MS = 30000;
+const MAPA_VISIBILITY_STALE_MS = 15000;
+let mapaVisibilityListenerAttached = false;
 
 /**
  * Devuelve un Map<rowKey, [lat, lon]> con las coordenadas ya separadas
@@ -2019,6 +2026,8 @@ async function loadMapaVehiculos(){
     mapaVehiculosLastLoadedAt = Date.now();
     renderLlegadasVehiculosViews();
     ensureMapaRealtime();
+    ensureMapaPolling();
+    ensureMapaVisibilityListener();
     const stamp = new Date().toLocaleTimeString("es-CO");
     setStatus(`Actualizado ${stamp} · ${mapaVehiculosRows.length} registros`);
   } catch (err) {
@@ -2053,6 +2062,16 @@ function applyRealtimeChangeToMapa(payload){
   renderLlegadasVehiculosViews();
 }
 
+function scheduleMapaRealtimeRetry(){
+  if (mapaRealtimeRetryTimer) return;
+  const delay = mapaRealtimeRetryDelay;
+  mapaRealtimeRetryDelay = Math.min(mapaRealtimeRetryDelay * 2, MAPA_REALTIME_RETRY_MAX_MS);
+  mapaRealtimeRetryTimer = setTimeout(() => {
+    mapaRealtimeRetryTimer = null;
+    ensureMapaRealtime();
+  }, delay);
+}
+
 function ensureMapaRealtime(){
   if (mapaRealtimeChannel) return;
   if (!planillaSupabaseClient?.channel) return;
@@ -2075,11 +2094,41 @@ function ensureMapaRealtime(){
       };
       let txt = `Realtime: ${String(status || "").toLowerCase()}`;
       let color = "var(--fg-soft)";
-      if (status === "SUBSCRIBED") { txt = "Realtime: activo"; color = "var(--ok)"; }
-      else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") { color = "var(--err)"; }
+      if (status === "SUBSCRIBED") {
+        txt = "Realtime: activo";
+        color = "var(--ok)";
+        mapaRealtimeRetryDelay = 1000;
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        color = "var(--err)";
+        try { planillaSupabaseClient.removeChannel?.(mapaRealtimeChannel); } catch (_) {}
+        mapaRealtimeChannel = null;
+        scheduleMapaRealtimeRetry();
+        loadMapaVehiculos();
+      }
       setLabel(mapaVehiculosRealtime, txt, color);
       setLabel(tablaLlegadasRealtime, txt, color);
     });
+}
+
+function ensureMapaPolling(){
+  if (mapaPollingTimer) return;
+  mapaPollingTimer = setInterval(() => {
+    if (document.hidden) return;
+    if (!currentUserId) return;
+    loadMapaVehiculos();
+  }, MAPA_POLLING_INTERVAL_MS);
+}
+
+function ensureMapaVisibilityListener(){
+  if (mapaVisibilityListenerAttached) return;
+  mapaVisibilityListenerAttached = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (!currentUserId) return;
+    const stale = !mapaVehiculosLastLoadedAt
+      || (Date.now() - mapaVehiculosLastLoadedAt) > MAPA_VISIBILITY_STALE_MS;
+    if (stale) loadMapaVehiculos();
+  });
 }
 
 function activateMapaVehiculosTab(){

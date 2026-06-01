@@ -17,6 +17,7 @@ const SONAR_ITINERARIES = [
   { id: "4501", grupo: "AEROPUERTO", nombre: "Aeropuerto-autopista-terminalnorte" },
   { id: "4502", grupo: "EXPOSICIONES", nombre: "Nutibara-exposiciones-tunel-aeropuerto" },
   { id: "4503", grupo: "AEROPUERTO", nombre: "Aeropuerto-Tunel-Exposiciones-Nutibara" },
+  { id: "4504", grupo: "SANDIEGO", nombre: "ccsandiego-tunel-aeropuerto" },
   { id: "4505", grupo: "SANDIEGO", nombre: "Almacentro-Tunel-Aeropuerto" }
 ];
 const PLANILLA_TABLE_NAME = "planilla_afiliados_2";

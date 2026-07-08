@@ -105,6 +105,7 @@ n" href="icons/icon-192.svg">
           <div class="tab" data-tab="despachos-sonar">Despachos Sonar</div>
           <div class="tab active" data-tab="mapa-vehiculos">Mapa vehiculos</div>
           <div class="tab" data-tab="alertas-gps">Alertas GPS <span id="gpsDescTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
+          <div class="tab" data-tab="alertas-despacho">Alertas despacho <span id="despAnomTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
           <div class="tab" data-tab="enturnamiento">Llegadas Aeropuerto</div>
           <div class="tab" data-tab="llegadas-almacentro-geo">Llegadas Almacentro</div>
           <div class="tab" data-tab="llegadas-exposiciones-geo">Llegadas Exposiciones</div>
@@ -804,6 +805,30 @@ n" href="icons/icon-192.svg">
           </div>
         </div>
 
+        <div id="tab-alertas-despacho" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Alertas de despacho · Sentido equivocado</h3>
+            <button class="btn btn-primary" id="despAnomRefresh">Actualizar</button>
+            <span style="display:inline-flex;gap:4px">
+              <button class="btn btn-primary" id="despAnomFiltroPend">Pendientes</button>
+              <button class="btn btn-ghost" id="despAnomFiltroTodas">Todas</button>
+            </span>
+            <input id="despAnomSearch" type="search" placeholder="Buscar interno / placa / itinerario…" style="min-width:200px" />
+            <span class="muted">Registros: <strong id="despAnomCount">0</strong></span>
+            <span class="muted" id="despAnomStatus">Sin cargar</span>
+          </div>
+          <div id="despAnomRecordatorio" style="display:none;margin:0 0 10px 0;padding:10px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#7f1d1d;font-weight:600"></div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Un carro se despachó y cruzó la geocerca de <b>sentido contrario</b> al de su despacho (ej. despacho de <b>BAJADA</b> pero pasó por la geocerca de <b>SUBIDA</b>). Eso significa que <b>no se enturnará</b> en su destino. Se detecta solo, <b>24/7</b>. Revisa y corrige el despacho, luego marca <b>Resuelto</b>.
+          </div>
+          <div style="overflow:auto;max-height:66vh">
+            <table class="ent-tabla">
+              <thead><tr><th>INTERNO</th><th>PLACA</th><th>ITINERARIO DESPACHADO</th><th>DESPACHO VA</th><th>PERO CRUZÓ</th><th>DETECTADA</th><th>ACCIÓN</th></tr></thead>
+              <tbody id="despAnomBody"><tr><td colspan="7" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
         <div id="tab-vuelos" class="tab-content">
           <div class="row mobile-filters" style="margin-bottom:10px">
             <h3 style="margin:0">Vuelos MDE (Rionegro)</h3>
@@ -1213,9 +1238,9 @@ n" href="icons/icon-192.svg">
   <div id="mapaFloatingBody"></div>
 </div>
 
-<script src="js/functions.js?v=1.10.155"></script>
-<script src="js/main.js?v=1.10.155"></script>
-<script src="js/pwa.js?v=1.10.155"></script>
+<script src="js/functions.js?v=1.10.156"></script>
+<script src="js/main.js?v=1.10.156"></script>
+<script src="js/pwa.js?v=1.10.156"></script>
 <script>
   // Interruptor de tema claro/oscuro (persistente en localStorage).
   (function(){

@@ -8708,6 +8708,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tabId === 'vista-excel') refreshVistaExcel();
     if (tabId === 'cumplimiento') refreshCumplimiento();
     if (tabId === 'alertas-gps') { loadGpsDesconexiones(); ensureGpsDescPolling(); }
+    if (tabId === 'alertas-despacho') { loadDespAnomalias(); ensureDespAnomPolling(); }
     if (tabId === 'auditoria-manual') loadAuditoriaManual();
     if (tabId === 'vuelos') { loadVuelos(); ensureVuelosPolling(); }
     if (tabId === 'asistencias') { loadAsistencias(); ensureAsisTick(); }
@@ -8871,6 +8872,21 @@ function bindUIEvents(){
   if (ghDownload) ghDownload.addEventListener("click", () => downloadHistorialGpsVehiculo());
   // Recordatorio siempre visible de pendientes (badge en la pestaña), aunque no se esté viendo.
   ensureGpsDescPendientesPolling();
+  // Alertas de despacho (sentido equivocado)
+  const daRefresh = document.getElementById("despAnomRefresh");
+  if (daRefresh) daRefresh.addEventListener("click", () => loadDespAnomalias());
+  const daPend = document.getElementById("despAnomFiltroPend");
+  if (daPend) daPend.addEventListener("click", () => { despAnomSoloPendientes = true; renderDespAnomalias(); });
+  const daTodas = document.getElementById("despAnomFiltroTodas");
+  if (daTodas) daTodas.addEventListener("click", () => { despAnomSoloPendientes = false; renderDespAnomalias(); });
+  const daSearch = document.getElementById("despAnomSearch");
+  if (daSearch) daSearch.addEventListener("input", () => renderDespAnomalias());
+  const daBody = document.getElementById("despAnomBody");
+  if (daBody) daBody.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-resolver-anom]");
+    if (btn) resolverDespAnomalia(btn.getAttribute("data-resolver-anom"));
+  });
+  ensureDespAnomPendientesPolling();
 
   // Asistencias
   const aRefresh = document.getElementById("asisRefresh");
@@ -10306,6 +10322,126 @@ function ensureGpsDescPendientesPolling(){
   if (gpsDescPendientesTimer) return;
   refreshGpsDescPendientes();
   gpsDescPendientesTimer = setInterval(refreshGpsDescPendientes, 90000); // cada 1m30s
+}
+
+/* ============ Alertas de despacho (sentido equivocado) ============ */
+const DESP_ANOM_TABLE = "despachos_anomalias";
+let despAnomRows = [];
+let despAnomPollTimer = null;
+let despAnomPendientesTimer = null;
+let despAnomSoloPendientes = true;
+
+async function loadDespAnomalias(){
+  const status = document.getElementById("despAnomStatus");
+  if (status) status.textContent = "Consultando…";
+  try {
+    const { data, error } = await planillaSupabaseClient
+      .from(DESP_ANOM_TABLE)
+      .select("id,mid,interno,placa,reg_id,itinerario_id,itinerario,dispatch_dir,geocerca_dir,motivo,detectada_en,resuelto,resuelto_por,resuelto_en")
+      .order("detectada_en", { ascending: false })
+      .limit(500);
+    if (error) throw error;
+    despAnomRows = Array.isArray(data) ? data : [];
+    renderDespAnomalias();
+    refreshDespAnomPendientes();
+    const nPend = despAnomRows.filter(r => !r.resuelto).length;
+    if (status) status.textContent = `Actualizado ${horaCO(new Date())} · ${nPend} pendiente(s)`;
+  } catch (err) {
+    console.error("[desp-anom] error:", err);
+    if (status) status.textContent = `Error: ${err?.message || "fallo"}`;
+  }
+}
+
+function getDespAnomFiltradas(){
+  const term = String(document.getElementById("despAnomSearch")?.value || "").trim().toLowerCase();
+  return despAnomRows
+    .filter(r => !despAnomSoloPendientes || !r.resuelto)
+    .filter(r => !term || [r.interno, r.placa, r.itinerario, r.itinerario_id].join(" ").toLowerCase().includes(term));
+}
+
+function despDirBadge(dir){
+  const esBaja = String(dir || "").toLowerCase() === "baja";
+  const bg = esBaja ? "#0d9488" : "#d97706";
+  return `<span style="display:inline-block;background:${bg};color:#fff;font-weight:700;font-size:11px;padding:2px 9px;border-radius:999px">${esBaja ? "↓ BAJA" : "↑ SUBE"}</span>`;
+}
+
+function renderDespAnomalias(){
+  const body = document.getElementById("despAnomBody");
+  const count = document.getElementById("despAnomCount");
+  if (!body) return;
+  const filas = getDespAnomFiltradas();
+  if (count) count.textContent = String(filas.length);
+  if (!filas.length) {
+    body.innerHTML = `<tr><td colspan="7" class="muted" style="text-align:center;padding:14px">${despAnomSoloPendientes ? "Sin alertas de despacho pendientes. 👍" : "Sin alertas registradas."}</td></tr>`;
+    return;
+  }
+  body.innerHTML = filas.map(r => {
+    const pend = !r.resuelto;
+    const hora = r.detectada_en ? `${fechaDiaCO(r.detectada_en)} ${horaCO(r.detectada_en)}` : "-";
+    const accion = pend
+      ? `<button class="btn btn-success" data-resolver-anom="${escapeHtml(String(r.id))}">Resolver</button>`
+      : `<span class="muted">✅ Resuelto${r.resuelto_por ? " · " + escapeHtml(r.resuelto_por) : ""}</span>`;
+    return `<tr${pend ? ' style="background:#fef2f2"' : ''}>
+      <td><b>${escapeHtml(r.interno || "-")}</b></td>
+      <td>${escapeHtml(r.placa || "-")}</td>
+      <td>${escapeHtml(r.itinerario || "-")} <span class="muted">(${escapeHtml(r.itinerario_id || "-")})</span></td>
+      <td>${despDirBadge(r.dispatch_dir)}</td>
+      <td>${despDirBadge(r.geocerca_dir)}</td>
+      <td>${hora}</td>
+      <td>${accion}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function resolverDespAnomalia(id){
+  if (!id) return;
+  if (!window.confirm("¿Marcar esta alerta como RESUELTA?")) return;
+  try {
+    const { error } = await planillaSupabaseClient.from(DESP_ANOM_TABLE)
+      .update({ resuelto: true, resuelto_por: currentUserEmail || currentUserId || "desconocido", resuelto_en: new Date().toISOString() })
+      .eq("id", id);
+    if (error) throw error;
+    showToast("✅ Alerta resuelta.", "ok");
+    await loadDespAnomalias();
+  } catch (err) {
+    console.error("[desp-anom] resolver falló:", err);
+    showToast(`No se pudo: ${err?.message || "error"}`, "err");
+  }
+}
+
+function ensureDespAnomPolling(){
+  if (despAnomPollTimer) return;
+  despAnomPollTimer = setInterval(() => {
+    if (getActiveTabId() === "alertas-despacho") loadDespAnomalias();
+  }, 120000); // cada 2 min, igual que el cron
+}
+
+function setDespAnomTabBadge(n){
+  const b = document.getElementById("despAnomTabBadge");
+  if (b) { if (n > 0) { b.textContent = String(n); b.style.display = "inline-block"; } else b.style.display = "none"; }
+  const rec = document.getElementById("despAnomRecordatorio");
+  if (rec) {
+    if (n > 0) { rec.style.display = "block"; rec.innerHTML = `⚠️ Hay <b>${n}</b> alerta(s) de despacho <b>pendiente(s)</b>: carros despachados en sentido equivocado que no se enturnarán. Revísalas y márcalas como Resuelto.`; }
+    else rec.style.display = "none";
+  }
+}
+
+async function refreshDespAnomPendientes(){
+  if (!currentUserId) return;
+  try {
+    const { count, error } = await planillaSupabaseClient
+      .from(DESP_ANOM_TABLE).select("id", { count: "exact", head: true }).eq("resuelto", false);
+    if (error) throw error;
+    setDespAnomTabBadge(count || 0);
+  } catch (err) {
+    console.debug("[desp-anom] conteo pendientes falló:", err?.message || err);
+  }
+}
+
+function ensureDespAnomPendientesPolling(){
+  if (despAnomPendientesTimer) return;
+  refreshDespAnomPendientes();
+  despAnomPendientesTimer = setInterval(refreshDespAnomPendientes, 90000); // cada 1m30s
 }
 
 /* ============ Auditoría de ingresos manuales al enturnamiento ============ */

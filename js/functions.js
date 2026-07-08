@@ -492,9 +492,11 @@ function openEditPlanillaModal(payload = {}){
 }
 
 function buildItineraryOptionsHtml(itinerariesInput){
-  const itineraries = Array.isArray(itinerariesInput) && itinerariesInput.length
+  const base = Array.isArray(itinerariesInput) && itinerariesInput.length
     ? itinerariesInput
     : SONAR_ITINERARIES;
+  // No se pueden despachar itinerarios fuera de operación (ITINERARIOS_OCULTOS: 3385, 4413).
+  const itineraries = base.filter(item => !ITINERARIOS_OCULTOS.includes(String(item.id)));
   return `<option value="">Selecciona itinerario...</option>${
     itineraries.map(item => {
       const value = escapeHtml(String(item.id || ""));
@@ -3530,7 +3532,7 @@ function nowBogotaLocalInput(){
 }
 
 // Itinerarios fuera de operación: no se ofrecen ni al agregar manual ni al despachar (ej. 3385).
-const ITINERARIOS_OCULTOS = ["3385"];
+const ITINERARIOS_OCULTOS = ["3385", "4413"]; // fuera de operación: 3385, 4413 (Aeropuerto-Exposiciones)
 // Interno del que ya se propuso conductor por defecto (para no pisar lo que el usuario elija).
 let enturnoManualLastInterno = "";
 
@@ -3597,8 +3599,6 @@ function toggleEnturnoManual(show, preselectItin, allowedItins){
     if (hora) hora.value = nowBogotaLocalInput().slice(11, 16);
     const fechaHoyLbl = document.getElementById("enturnoManualFechaHoy");
     if (fechaHoyLbl) fechaHoyLbl.textContent = fechaBogotaISO();
-    const pos = document.getElementById("enturnoManualPos");
-    if (pos) pos.value = "";
     const mot = document.getElementById("enturnoManualMotivo");
     if (mot) mot.value = "";
     const just = document.getElementById("enturnoManualJustificacion");
@@ -3766,42 +3766,24 @@ function listaRowsParaItinerario(itinId){
   return rows.filter(r => listaDeFila(r) === target);
 }
 
-// Calcula un entro_en que ubique al carro en la posicion deseada de su lista.
-function isoParaPosicion(itinId, posicion){
-  const lista = listaRowsParaItinerario(itinId);
-  const times = lista.map(r => new Date(r?.entro_en || 0).getTime())
-    .filter(t => Number.isFinite(t)).sort((a, b) => a - b);
-  const n = times.length;
-  const p = Math.max(1, Math.min(posicion, n + 1));
-  let t;
-  if (n === 0) t = Date.now();
-  else if (p === 1) t = times[0] - 1000;                 // antes del actual #1
-  else if (p > n) t = Math.max(times[n - 1] + 1000, Date.now()); // al final
-  else t = Math.floor((times[p - 2] + times[p - 1]) / 2); // entre p-1 y p
-  return new Date(t).toISOString();
-}
-
 async function guardarEnturnoManual(){
   const st = document.getElementById("enturnoManualStatus");
   const internoVal = String(document.getElementById("enturnoManualInterno")?.value || "").trim();
   const itinId = String(document.getElementById("enturnoManualItin")?.value || "").trim();
   const horaVal = String(document.getElementById("enturnoManualHora")?.value || "").trim();
-  const posVal = parseInt(String(document.getElementById("enturnoManualPos")?.value || "").trim(), 10);
-  const tienePos = Number.isFinite(posVal) && posVal >= 1;
   if (!internoVal) { if (st) st.textContent = "Escribe el interno."; return; }
   if (!itinId) { if (st) st.textContent = "Elige el itinerario."; return; }
-  if (!tienePos && !horaVal) { if (st) st.textContent = "Indica la hora de paso o una posición (prelación)."; return; }
+  if (!horaVal) { if (st) st.textContent = "Indica la hora de paso."; return; }
   // Justificación OBLIGATORIA (por qué se ingresa a mano) — control anti-fraude.
   const justificacionVal = String(document.getElementById("enturnoManualJustificacion")?.value || "").trim();
   if (justificacionVal.length < 8) { if (st) st.textContent = "Escribe la justificación (mínimo 8 caracteres): por qué se ingresa a mano."; return; }
-  // La FECHA es SIEMPRE hoy (Colombia) y no se puede cambiar; solo se toma la hora escrita.
+  // La FECHA es SIEMPRE hoy (Colombia) y no se puede cambiar; el carro se ordena por la
+  // HORA que se escribe (esa es la que manda; no hay override de posición).
   const hoyISO = fechaBogotaISO();
-  const entroEnIso = tienePos ? isoParaPosicion(itinId, posVal) : `${hoyISO}T${horaVal}:00-05:00`;
+  const entroEnIso = `${hoyISO}T${horaVal}:00-05:00`;
   // Anti-fraude: la hora de paso no puede ser futura.
-  if (!tienePos) {
-    const tPaso = new Date(entroEnIso).getTime();
-    if (Number.isFinite(tPaso) && tPaso > Date.now() + 120000) { if (st) st.textContent = "La hora de paso no puede ser futura."; return; }
-  }
+  const tPaso = new Date(entroEnIso).getTime();
+  if (Number.isFinite(tPaso) && tPaso > Date.now() + 120000) { if (st) st.textContent = "La hora de paso no puede ser futura."; return; }
   const veh = buscarVehiculoPorInterno(internoVal);
   const itin = SONAR_ITINERARIES.find(it => String(it.id) === itinId);
   const motivoVal = String(document.getElementById("enturnoManualMotivo")?.value || "").trim();
@@ -3824,7 +3806,7 @@ async function guardarEnturnoManual(){
       estado: "EN_ESPERA",
       sin_despacho: false,
       manual: true,
-      prioridad: tienePos,
+      prioridad: false,
       sentido: sentidoDeItinerario(itinId),
       motivo: motivoVal || null,
       driver_name: conductorVal || null,
@@ -3843,21 +3825,19 @@ async function guardarEnturnoManual(){
         itinerario: itin?.nombre || null,
         conductor: conductorVal || null,
         hora_paso: entroEnIso,
-        posicion: tienePos ? posVal : null,
+        posicion: null,
         motivo: motivoVal || null,
         justificacion: justificacionVal,
         usuario: currentUserEmail || currentUserId || "desconocido",
       });
     } catch (logErr) { console.warn("[enturnamientos] no se pudo guardar la auditoría:", logErr); }
-    showToast(`Interno ${internoVal} agregado${tienePos ? ` en posición ${posVal} (prelación)` : ""}.`, "ok");
+    showToast(`Interno ${internoVal} agregado (${horaVal}).`, "ok");
     // Limpia para el siguiente.
     const internoEl = document.getElementById("enturnoManualInterno");
     if (internoEl) internoEl.value = "";
     const condOtroEl2 = document.getElementById("enturnoManualConductorOtro");
     if (condOtroEl2) { condOtroEl2.value = ""; condOtroEl2.style.display = "none"; }
     enturnoManualLastInterno = null; // fuerza reconstruir el desplegable de conductor
-    const posEl = document.getElementById("enturnoManualPos");
-    if (posEl) posEl.value = "";
     const horaEl = document.getElementById("enturnoManualHora");
     if (horaEl) horaEl.value = nowBogotaLocalInput().slice(11, 16);
     const justEl = document.getElementById("enturnoManualJustificacion");

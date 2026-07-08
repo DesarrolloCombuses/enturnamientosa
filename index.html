@@ -1117,15 +1117,10 @@ n" href="icons/icon-192.svg">
           <span class="muted ent-modal-hint" id="enturnoManualLista">—</span>
         </div>
       </div>
-      <div>
+      <div style="grid-column:1 / -1">
         <strong>Hora de paso</strong>
         <input id="enturnoManualHora" type="time" style="width:100%;margin-top:6px" />
-        <div class="muted ent-modal-hint">Solo la <b>hora</b> (Colombia). La fecha queda fija en <b id="enturnoManualFechaHoy">hoy</b> y <b>no se puede cambiar</b>.</div>
-      </div>
-      <div>
-        <strong>Posición (prelación)</strong>
-        <input id="enturnoManualPos" type="number" min="1" step="1" placeholder="—" style="width:100%;margin-top:6px" />
-        <div class="muted ent-modal-hint">Vacío = entra por hora. Con número = lo coloca en esa posición de la cola.</div>
+        <div class="muted ent-modal-hint">Solo la <b>hora</b> (Colombia). El carro se ordena en la cola por esta hora. La fecha queda fija en <b id="enturnoManualFechaHoy">hoy</b> y <b>no se puede cambiar</b>.</div>
       </div>
       <div style="grid-column:1 / -1">
         <strong>Motivo</strong>
@@ -1174,9 +1169,9 @@ n" href="icons/icon-192.svg">
   <div id="mapaFloatingBody"></div>
 </div>
 
-<script src="js/functions.js?v=1.10.153"></script>
-<script src="js/main.js?v=1.10.153"></script>
-<script src="js/pwa.js?v=1.10.153"></script>
+<script src="js/functions.js?v=1.10.154"></script>
+<script src="js/main.js?v=1.10.154"></script>
+<script src="js/pwa.js?v=1.10.154"></script>
 <script>
   // Interruptor de tema claro/oscuro (persistente en localStorage).
   (function(){

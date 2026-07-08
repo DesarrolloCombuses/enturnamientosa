@@ -3160,14 +3160,17 @@ function fueraDeHorario(prog){
 
 function renderEnturnamientoTab(){
   const rows = enturnamientosRows || [];
-  const suben = rows.filter(r => sentidoDeFila(r) === "sube");
-  const bajan = rows.filter(r => sentidoDeFila(r) === "baja");
+  const aeropuerto = rows.filter(r => listaDeFila(r) === "aeropuerto");
+  const almacentro = rows.filter(r => listaDeFila(r) === "almacentro");
+  const exposiciones = rows.filter(r => listaDeFila(r) === "exposiciones");
   // Llegadas AEROPUERTO = TODO lo que SUBE (va hacia el aeropuerto = llega al aeropuerto).
-  renderListaLlegadas(enturnamientoGrid, enturnamientoCount, suben, "Sin llegadas por ahora.");
-  // Llegadas ALMACENTRO = TODO lo que BAJA (sale del aeropuerto hacia la ciudad).
-  renderListaLlegadas(document.getElementById("almacentroGeoGrid"), document.getElementById("almacentroGeoCount"), bajan, "Sin llegadas por ahora.");
-  // "Salidas Aeropuerto" (oculta) sigue de respaldo: todas las bajadas.
-  renderListaLlegadas(document.getElementById("salidasGrid"), document.getElementById("salidasCount"), bajan, "Sin salidas por ahora.");
+  renderListaLlegadas(enturnamientoGrid, enturnamientoCount, aeropuerto, "Sin llegadas por ahora.");
+  // Llegadas ALMACENTRO = lo que BAJA hacia Almacentro/San Diego (sin Exposiciones).
+  renderListaLlegadas(document.getElementById("almacentroGeoGrid"), document.getElementById("almacentroGeoCount"), almacentro, "Sin llegadas por ahora.");
+  // Llegadas EXPOSICIONES = lo que BAJA hacia Exposiciones/Nutibara (pestaña aparte).
+  renderListaLlegadas(document.getElementById("exposicionesGeoGrid"), document.getElementById("exposicionesGeoCount"), exposiciones, "Sin llegadas por ahora.");
+  // "Salidas Aeropuerto" (oculta) sigue de respaldo: todas las bajadas (Almacentro + Exposiciones).
+  renderListaLlegadas(document.getElementById("salidasGrid"), document.getElementById("salidasCount"), almacentro.concat(exposiciones), "Sin salidas por ahora.");
 }
 
 // Render de una lista (tabla) de enturnamientos en orden de llegada.
@@ -3311,9 +3314,9 @@ function pedirMotivoQuitar(){
 // Devuelve las filas EN ESPERA de la MISMA lista visible para este carro, ordenadas por hora de paso.
 function listaDelEnturno(row){
   const rows = enturnamientosRows || [];
-  // 2 listas: Aeropuerto = todo lo que sube; Almacentro = todo lo que baja.
-  const esBaja = sentidoDeFila(row) === "baja";
-  const lista = rows.filter(r => (sentidoDeFila(r) === "baja") === esBaja);
+  // 3 listas: Aeropuerto (sube), Almacentro (baja) y Exposiciones (baja hacia Exposiciones).
+  const target = listaDeFila(row);
+  const lista = rows.filter(r => listaDeFila(r) === target);
   return [...lista].sort((a, b) =>
     new Date(a?.entro_en || 0).getTime() - new Date(b?.entro_en || 0).getTime()
   );
@@ -3604,6 +3607,30 @@ function sentidoDeFila(row){
   return sentidoDeItinerario(row?.itinerario_id);
 }
 
+// De lo que BAJA del aeropuerto, estos itinerarios van hacia Exposiciones/Nutibara y
+// tienen su propia pestaña "Llegadas Exposiciones" (no se mezclan con Almacentro).
+const ITINERARIOS_EXPOSICIONES = ["4503", "4413"];
+// Solo bajada hacia Almacentro/San Diego (bajada - Exposiciones - ocultos).
+const ITINERARIOS_ALMACENTRO_LLEGADA = ITINERARIOS_BAJADA_AEROPUERTO
+  .filter(id => !ITINERARIOS_EXPOSICIONES.includes(id) && !ITINERARIOS_OCULTOS.includes(id));
+const NOMBRE_LISTA = {
+  aeropuerto: "Llegadas Aeropuerto",
+  almacentro: "Llegadas Almacentro",
+  exposiciones: "Llegadas Exposiciones",
+};
+
+// Pestaña a la que pertenece un itinerario: "aeropuerto" (sube), "exposiciones" o "almacentro" (baja).
+function listaDeItinerario(itinId){
+  const id = String(itinId || "").trim();
+  if (sentidoDeItinerario(id) === "sube") return "aeropuerto";
+  return ITINERARIOS_EXPOSICIONES.includes(id) ? "exposiciones" : "almacentro";
+}
+// Pestaña de una fila de enturnamiento (usa el sentido guardado + el itinerario).
+function listaDeFila(row){
+  if (sentidoDeFila(row) === "sube") return "aeropuerto";
+  return ITINERARIOS_EXPOSICIONES.includes(String(row?.itinerario_id || "").trim()) ? "exposiciones" : "almacentro";
+}
+
 // Itinerarios que se PUEDEN despachar segun el punto (lista) del carro.
 // Almacentro/Exposiciones -> solo los de su corredor (subida).
 // Aeropuerto (bajada) -> solo los de bajada. Evita elegir un itinerario de otro punto.
@@ -3620,9 +3647,8 @@ function itinerariosDelPunto(row){
 }
 
 // Nombre legible de la lista (pestaña) a la que caería un itinerario.
-// Usa el mismo criterio que se guarda (sentidoDeItinerario) para no contradecir la lista real.
 function nombreListaParaItinerario(itinId){
-  return sentidoDeItinerario(String(itinId)) === "baja" ? "Llegadas Almacentro" : "Llegadas Aeropuerto";
+  return NOMBRE_LISTA[listaDeItinerario(itinId)] || "Llegadas Aeropuerto";
 }
 
 // Actualiza la vista previa del modal manual (placa/base, conductor, sentido, lista destino).
@@ -3695,8 +3721,8 @@ function refreshEnturnoManualPreview(){
 // Filas EN_ESPERA que comparten lista (pestaña) con un itinerario dado.
 function listaRowsParaItinerario(itinId){
   const rows = enturnamientosRows || [];
-  const esBaja = sentidoDeItinerario(String(itinId)) === "baja";
-  return rows.filter(r => (sentidoDeFila(r) === "baja") === esBaja);
+  const target = listaDeItinerario(itinId);
+  return rows.filter(r => listaDeFila(r) === target);
 }
 
 // Calcula un entro_en que ubique al carro en la posicion deseada de su lista.
@@ -8791,9 +8817,9 @@ function bindUIEvents(){
   // Aeropuerto = SUBE; Almacentro = BAJA. Cada planilla muestra SOLO sus itinerarios.
   if (btnEnturnoManual) btnEnturnoManual.addEventListener("click", () => toggleEnturnoManual(true, "4505", ITINERARIOS_SUBIDA_AEROPUERTO)); // Aeropuerto (sube)
   const btnEntManAlm = document.getElementById("btnEnturnoManualAlmacentro");
-  if (btnEntManAlm) btnEntManAlm.addEventListener("click", () => toggleEnturnoManual(true, "4507", ITINERARIOS_BAJADA_AEROPUERTO)); // Almacentro (baja)
+  if (btnEntManAlm) btnEntManAlm.addEventListener("click", () => toggleEnturnoManual(true, "4507", ITINERARIOS_ALMACENTRO_LLEGADA)); // Almacentro (baja, sin Exposiciones)
   const btnEntManExp = document.getElementById("btnEnturnoManualExpo");
-  if (btnEntManExp) btnEntManExp.addEventListener("click", () => toggleEnturnoManual(true, "4507", ITINERARIOS_BAJADA_AEROPUERTO)); // (Exposiciones oculta)
+  if (btnEntManExp) btnEntManExp.addEventListener("click", () => toggleEnturnoManual(true, "4503", ITINERARIOS_EXPOSICIONES)); // Exposiciones (baja hacia Exposiciones)
   if (btnEnturnoManualCancel) btnEnturnoManualCancel.addEventListener("click", () => toggleEnturnoManual(false));
   const condSel = document.getElementById("enturnoManualConductorSelect");
   if (condSel) condSel.addEventListener("change", () => {

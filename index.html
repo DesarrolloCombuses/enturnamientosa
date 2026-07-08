@@ -1056,37 +1056,81 @@ n" href="icons/icon-192.svg">
   </div>
 </div>
 <div id="manualDispatchModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="manualDispatchTitle">
-  <div class="modal-card">
-    <h3 id="manualDispatchTitle" class="modal-title">Despacho manual</h3>
-    <div class="modal-sub">Enviar despacho manual a sonar-dispatch para cualquier vehiculo.</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+  <div class="modal-card md-card">
+    <div class="md-head">
+      <div class="md-head-icon">🚍</div>
       <div>
-        <strong>Interno *</strong>
-        <input id="manualDispatchInterno" type="text" list="manualDispatchInternoList" placeholder="Buscar interno..." />
-        <datalist id="manualDispatchInternoList"></datalist>
-      </div>
-      <div><strong>Base</strong><input id="manualDispatchBase" type="text" placeholder="Base" readonly /></div>
-      <div><strong>MID *</strong><input id="manualDispatchMid" type="text" placeholder="MID" readonly /></div>
-      <div>
-        <strong>Conductor *</strong>
-        <input id="manualDispatchConductorName" type="text" list="manualDispatchConductorList" placeholder="Buscar conductor..." />
-        <datalist id="manualDispatchConductorList"></datalist>
-      </div>
-      <div style="grid-column:1 / -1"><strong>Driver ID *</strong><input id="manualDispatchDriverId" type="text" placeholder="Driver ID" readonly /></div>
-      <div style="grid-column:1 / -1">
-        <strong>Itinerario *</strong>
-        <select id="manualDispatchItinerarySelect" style="width:100%;margin-top:6px">
-          <option value="">Selecciona itinerario...</option>
-        </select>
-      </div>
-      <div style="grid-column:1 / -1">
-        <strong>Observaciones</strong>
-        <textarea id="manualDispatchObs" class="note-input" maxlength="1200" placeholder="Observacion opcional para el despacho manual"></textarea>
+        <h3 id="manualDispatchTitle" class="modal-title">Despacho manual</h3>
+        <div class="modal-sub">Envía un despacho a Sonar para cualquier vehículo.</div>
       </div>
     </div>
-    <div class="modal-actions" style="margin-top:12px">
+    <div class="md-grid">
+      <div class="md-field">
+        <label>🚌 Interno <span class="req">*</span></label>
+        <input id="manualDispatchInterno" type="text" list="manualDispatchInternoList" placeholder="Escribe o busca el interno…" />
+        <datalist id="manualDispatchInternoList"></datalist>
+      </div>
+      <div class="md-field readonly">
+        <label>🏢 Base <span class="auto">auto</span></label>
+        <input id="manualDispatchBase" type="text" placeholder="—" readonly />
+      </div>
+      <div class="md-field readonly">
+        <label>📡 MID <span class="req">*</span> <span class="auto">auto</span></label>
+        <input id="manualDispatchMid" type="text" placeholder="Se llena con el interno" readonly />
+      </div>
+      <div class="md-field">
+        <label>👤 Conductor <span class="req">*</span></label>
+        <input id="manualDispatchConductorName" type="text" list="manualDispatchConductorList" placeholder="Escribe o busca el conductor…" />
+        <datalist id="manualDispatchConductorList"></datalist>
+      </div>
+      <div class="md-field readonly span2">
+        <label>🆔 Driver ID <span class="req">*</span> <span class="auto">auto</span></label>
+        <input id="manualDispatchDriverId" type="text" placeholder="Se llena con el conductor" readonly />
+      </div>
+      <div class="md-field span2">
+        <label>🗺️ Itinerario <span class="req">*</span></label>
+        <select id="manualDispatchItinerarySelect">
+          <option value="">Selecciona itinerario…</option>
+        </select>
+        <div id="manualDispatchDireccion" class="md-dir">
+          <span id="manualDispatchDireccionIcon" class="md-dir-arrow">↑</span>
+          <span id="manualDispatchDireccionTexto"></span>
+        </div>
+      </div>
+      <div class="md-field span2">
+        <label>📝 Observaciones <span class="opt">opcional</span></label>
+        <textarea id="manualDispatchObs" class="note-input" maxlength="1200" placeholder="Nota opcional para el despacho…"></textarea>
+      </div>
+    </div>
+    <div id="manualDispatchStatus" class="md-status"></div>
+    <div class="modal-actions" style="margin-top:14px">
       <button class="btn btn-ghost" id="btnManualDispatchCancel">Cancelar</button>
-      <button class="btn btn-primary" id="btnManualDispatchConfirm">Enviar despacho</button>
+      <button class="btn btn-primary" id="btnManualDispatchConfirm">🚀 Enviar despacho</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: confirmar despacho manual (con direccion) -->
+<div id="manualDispatchConfirmModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="mdcTitle">
+  <div class="modal-card">
+    <h3 id="mdcTitle" class="modal-title">Confirmar despacho manual</h3>
+    <div class="modal-sub">Revisa la <b>dirección</b> antes de enviar a Sonar.</div>
+    <div id="mdcBanner" style="display:flex;align-items:center;gap:14px;margin:14px 0;padding:16px 18px;border-radius:12px;color:#fff">
+      <span id="mdcArrow" style="font-size:40px;line-height:1;font-weight:800">↑</span>
+      <div>
+        <div id="mdcDirTitulo" style="font-size:22px;font-weight:800;letter-spacing:.5px">SUBE</div>
+        <div id="mdcDirDesc" style="font-size:13px;opacity:.95"></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div><strong>Interno:</strong> <span id="mdcInterno">-</span></div>
+      <div><strong>Driver ID:</strong> <span id="mdcDriver">-</span></div>
+      <div style="grid-column:1 / -1"><strong>Itinerario:</strong> <span id="mdcItin">-</span></div>
+    </div>
+    <div class="muted" style="margin-top:10px">⚠ Si la dirección no corresponde al recorrido real, el carro no se volverá a enturnar en la geocerca de destino.</div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn btn-ghost" id="btnMdcCancel">Cancelar</button>
+      <button class="btn btn-primary" id="btnMdcConfirm">Sí, enviar despacho</button>
     </div>
   </div>
 </div>
@@ -1169,9 +1213,9 @@ n" href="icons/icon-192.svg">
   <div id="mapaFloatingBody"></div>
 </div>
 
-<script src="js/functions.js?v=1.10.154"></script>
-<script src="js/main.js?v=1.10.154"></script>
-<script src="js/pwa.js?v=1.10.154"></script>
+<script src="js/functions.js?v=1.10.155"></script>
+<script src="js/main.js?v=1.10.155"></script>
+<script src="js/pwa.js?v=1.10.155"></script>
 <script>
   // Interruptor de tema claro/oscuro (persistente en localStorage).
   (function(){

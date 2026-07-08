@@ -635,6 +635,28 @@ function openDispatchConfirmModal(payload = {}){
   });
 }
 
+// Valida los campos SIN cerrar el modal: si falta algo, lo muestra ahí mismo y
+// deja el modal abierto (nada de cerrar y avisar al final). Solo cierra si está OK.
+function setManualDispatchError(msg){
+  const st = document.getElementById("manualDispatchStatus");
+  if (!st) return;
+  if (msg) { st.textContent = msg; st.style.display = "block"; }
+  else { st.textContent = ""; st.style.display = "none"; }
+}
+function trySubmitManualDispatch(){
+  const faltan = [];
+  if (!String(manualDispatchInterno?.value || "").trim()) faltan.push("Interno");
+  if (!String(manualDispatchMid?.value || "").trim()) faltan.push("MID (elige un interno válido de Sonar)");
+  if (!String(manualDispatchConductorName?.value || "").trim() || !String(manualDispatchDriverId?.value || "").trim()) faltan.push("Conductor / Driver ID");
+  if (!String(manualDispatchItinerarySelect?.value || "").trim()) faltan.push("Itinerario");
+  if (faltan.length) {
+    setManualDispatchError("Falta completar: " + faltan.join(", ") + ".");
+    return;
+  }
+  setManualDispatchError("");
+  closeManualDispatchModal(true);
+}
+
 function closeManualDispatchModal(confirmed){
   if (manualDispatchModal) manualDispatchModal.classList.add("hidden");
   if (manualDispatchModalResolver) {
@@ -4810,7 +4832,12 @@ function applyManualDispatchVehicleRow(row){
     applyManualDispatchConductorSelection();
     return;
   }
-  const base = getBaseCanonical(row?.base || "") || getManualDispatchDefaultBase();
+  // La base sale de la tabla oficial interno->base (VEHICLE_TO_BASE_MAP); si el interno
+  // no está en la tabla, cae a la base del registro de Sonar y por último a la del usuario.
+  const interno = String(row?.interno || manualDispatchInterno?.value || "").trim();
+  const base = getBaseCanonical(getBaseLabelForInterno(interno))
+    || getBaseCanonical(row?.base || "")
+    || getManualDispatchDefaultBase();
   const mid = String(row?.mid || "").trim();
   if (manualDispatchBase) manualDispatchBase.value = base;
   if (manualDispatchMid) manualDispatchMid.value = mid;
@@ -4856,11 +4883,65 @@ async function openManualDispatchModal(){
     manualDispatchItinerarySelect.innerHTML = buildItineraryOptionsHtml();
     manualDispatchItinerarySelect.value = "";
   }
+  updateManualDispatchDireccion();
+  setManualDispatchError("");
   manualDispatchModal.classList.remove("hidden");
   setTimeout(() => manualDispatchInterno?.focus(), 10);
   return new Promise(resolve => {
     manualDispatchModalResolver = resolve;
   });
+}
+
+// Muestra en el modal si el itinerario elegido es de SUBIDA (va al aeropuerto) o de
+// BAJADA (sale del aeropuerto), para que el operador no despache en el sentido equivocado.
+function updateManualDispatchDireccion(){
+  const strip = document.getElementById("manualDispatchDireccion");
+  const icon = document.getElementById("manualDispatchDireccionIcon");
+  const texto = document.getElementById("manualDispatchDireccionTexto");
+  const itin = String(manualDispatchItinerarySelect?.value || "").trim();
+  if (!strip) return;
+  if (!itin) { strip.style.display = "none"; return; }
+  const esBaja = sentidoDeItinerario(itin) === "baja";
+  strip.style.display = "flex";
+  strip.style.background = esBaja ? "#0d9488" : "#d97706";
+  if (icon) icon.textContent = esBaja ? "↓" : "↑";
+  if (texto) texto.textContent = esBaja
+    ? "BAJA · sale del aeropuerto hacia la ciudad"
+    : "SUBE · va desde la ciudad hacia el aeropuerto";
+}
+
+// Modal propio de confirmación del despacho manual, con banner grande de dirección.
+let manualDispatchConfirmResolver = null;
+function openManualDispatchConfirm(payload, dir){
+  const modal = document.getElementById("manualDispatchConfirmModal");
+  if (!modal) {
+    // Respaldo si el modal no existe: confirmación simple.
+    return Promise.resolve(window.confirm(`¿Confirmar despacho manual del interno ${payload.interno}?`));
+  }
+  const esBaja = dir === "baja";
+  const banner = document.getElementById("mdcBanner");
+  const arrow = document.getElementById("mdcArrow");
+  const titulo = document.getElementById("mdcDirTitulo");
+  const desc = document.getElementById("mdcDirDesc");
+  if (banner) banner.style.background = esBaja ? "#0d9488" : "#d97706";
+  if (arrow) arrow.textContent = esBaja ? "↓" : "↑";
+  if (titulo) titulo.textContent = esBaja ? "BAJA" : "SUBE";
+  if (desc) desc.textContent = esBaja ? "Sale del aeropuerto hacia la ciudad" : "Va desde la ciudad hacia el aeropuerto";
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set("mdcInterno", payload.interno || "-");
+  set("mdcDriver", payload.drvId || "-");
+  set("mdcItin", `${payload.itineraryLabel || payload.itinerary} (${payload.itinerary})`);
+  modal.classList.remove("hidden");
+  return new Promise(resolve => { manualDispatchConfirmResolver = resolve; });
+}
+function closeManualDispatchConfirm(ok){
+  const modal = document.getElementById("manualDispatchConfirmModal");
+  if (modal) modal.classList.add("hidden");
+  if (manualDispatchConfirmResolver) {
+    const r = manualDispatchConfirmResolver;
+    manualDispatchConfirmResolver = null;
+    r(!!ok);
+  }
 }
 
 function applyAuthState(session){
@@ -4976,8 +5057,17 @@ if (btnRemoveFromListConfirm) btnRemoveFromListConfirm.onclick = () => closeRemo
 if (btnEditPlanillaCancel) btnEditPlanillaCancel.onclick = () => closeEditPlanillaModal(false);
 if (btnEditPlanillaSave) btnEditPlanillaSave.onclick = () => closeEditPlanillaModal(true);
 if (btnManualDispatchCancel) btnManualDispatchCancel.onclick = () => closeManualDispatchModal(false);
-if (btnManualDispatchConfirm) btnManualDispatchConfirm.onclick = () => closeManualDispatchModal(true);
+if (btnManualDispatchConfirm) btnManualDispatchConfirm.onclick = () => trySubmitManualDispatch();
 if (btnManualDispatch) btnManualDispatch.onclick = () => handleManualDispatch();
+if (manualDispatchItinerarySelect) manualDispatchItinerarySelect.addEventListener("change", () => { updateManualDispatchDireccion(); setManualDispatchError(""); });
+{
+  const btnMdcCancel = document.getElementById("btnMdcCancel");
+  const btnMdcConfirm = document.getElementById("btnMdcConfirm");
+  const mdcModal = document.getElementById("manualDispatchConfirmModal");
+  if (btnMdcCancel) btnMdcCancel.onclick = () => closeManualDispatchConfirm(false);
+  if (btnMdcConfirm) btnMdcConfirm.onclick = () => closeManualDispatchConfirm(true);
+  if (mdcModal) mdcModal.addEventListener("click", (ev) => { if (ev.target === mdcModal) closeManualDispatchConfirm(false); });
+}
 if (manualDispatchInterno) manualDispatchInterno.addEventListener("change", () => { applyManualDispatchVehicleSelection(); });
 if (manualDispatchInterno) manualDispatchInterno.addEventListener("input", () => { applyManualDispatchVehicleSelection(); });
 if (manualDispatchConductorName) manualDispatchConductorName.addEventListener("change", applyManualDispatchConductorSelection);
@@ -7008,6 +7098,11 @@ async function handleManualDispatch(){
     return;
   }
   payload.itineraryLabel = String(getSonarItineraryById(payload.itinerary)?.nombre || payload.itinerary);
+  // Confirmación con la DIRECCIÓN del itinerario, para no despachar en el sentido
+  // equivocado (si va al revés, la geocerca de destino no lo vuelve a enturnar).
+  const dir = sentidoDeItinerario(payload.itinerary);
+  const ok = await openManualDispatchConfirm(payload, dir);
+  if (!ok) return;
   let shouldReloadFromDb = false;
   try {
     const result = await sendDispatchToSonar(payload);
@@ -8024,7 +8119,7 @@ const VEHICLE_TO_BASE_MAP = {
   "744":"BASE 3","745":"BASE 3","746":"BASE 4","747":"BASE 5","748":"BASE 2",
   "749":"BASE 2","750":"BASE 3","751":"BASE 3","752":"BASE 3","753":"BASE 3",
   "754":"BASE 3","755":"BASE 3","756":"BASE 8","757":"BASE 5","758":"BASE 3",
-  "759":"BASE 6","15":"BASE 5","17":"BASE 3","59":"BASE 5","64":"BASE 5",
+  "759":"BASE 3","15":"BASE 5","17":"BASE 3","59":"BASE 5","64":"BASE 5",
   "89":"BASE 5","100":"BASE 5","157":"BASE 5","163":"BASE 5","211":"BASE 5",
   "232":"BASE 5","507":"BASE 3","510":"BASE 3",
   "764":"BASE 0","766":"BASE 0","767":"BASE 0","768":"BASE 0","769":"BASE 0"

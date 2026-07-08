@@ -3045,6 +3045,7 @@ async function loadEnturnamientos(){
       .order("entro_en", { ascending: true });
     if (error) throw error;
     enturnamientosRows = Array.isArray(data) ? data : [];
+    await cruzarDespachosAutomaticos(); // saca los que ya salieron por despacho automático (Sonar)
     renderEnturnamientoTab();
     const stamp = horaCO(new Date());
     if (enturnamientoStatus) enturnamientoStatus.textContent = `Actualizado ${stamp}`;
@@ -3055,6 +3056,46 @@ async function loadEnturnamientos(){
   } catch (err) {
     console.error("[enturnamientos] carga fallo:", err);
     if (enturnamientoStatus) enturnamientoStatus.textContent = `Error: ${err?.message || "fallo"}`;
+  }
+}
+
+// Cruce con Sonar: si un carro en espera YA tiene un despacho ACTIVO posterior a su
+// llegada y en sentido CONTRARIO (el retorno), es que ya salió (p.ej. la subida
+// Nutibara-exposiciones-tunel-aeropuerto se despacha automática). Se saca de la lista
+// y se marca DESPACHADO para que no reaparezca.
+async function cruzarDespachosAutomaticos(){
+  try {
+    if (!Array.isArray(enturnamientosRows) || !enturnamientosRows.length) return;
+    // Foto fresca de despachos ACTIVOS (más ágil que el refresco del mapa para este cruce).
+    if (!mapaActivosLoadedAt || (Date.now() - mapaActivosLoadedAt) > 10000) {
+      await loadMapaDespachosActivos();
+    }
+    const activos = getActiveDispatchByVehicleId();
+    if (!activos || !activos.size) return;
+    const yaSalieron = [];
+    for (const r of enturnamientosRows) {
+      const vid = String(r?.mid || "").trim();
+      if (!vid) continue; // sin MID no se puede cruzar (ej. manual sin Sonar)
+      const disp = activos.get(vid);
+      if (!disp) continue;
+      const tDisp = new Date(disp.created_at || 0).getTime();
+      const tLleg = new Date(r?.entro_en || 0).getTime();
+      if (!(Number.isFinite(tDisp) && Number.isFinite(tLleg) && tDisp > tLleg)) continue; // el despacho debe ser POSTERIOR a esta llegada
+      // El retorno va en sentido contrario a la llegada; mismo sentido no es retorno.
+      if (sentidoDeItinerario(disp.itinerario_id) === sentidoDeFila(r)) continue;
+      yaSalieron.push(r.id);
+    }
+    if (!yaSalieron.length) return;
+    const quitar = new Set(yaSalieron.map(String));
+    // Saca de memoria ya (para que desaparezcan de la lista al instante)...
+    enturnamientosRows = enturnamientosRows.filter(r => !quitar.has(String(r?.id)));
+    // ...y marca en BD en segundo plano para que no reaparezcan en la próxima carga.
+    planillaSupabaseClient.from(ENTURNAMIENTOS_TABLE)
+      .update({ estado: "DESPACHADO", motivo: "Despacho automático detectado (cruce Sonar)" })
+      .in("id", yaSalieron)
+      .then(({ error }) => { if (error) console.warn("[enturnamientos] marca auto-despacho falló:", error); });
+  } catch (err) {
+    console.warn("[enturnamientos] cruce de despachos automáticos falló:", err);
   }
 }
 

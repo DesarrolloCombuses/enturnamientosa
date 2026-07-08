@@ -35,3 +35,9 @@ desktop.ini
 *.tmp
 *.bak
 ~*
+
+# Backend de vuelos (Flask/Python): NO va en este repo publico (contiene credenciales)
+vuelos/
+
+# Supabase CLI local (Edge Functions se despliegan a Supabase, no a GitHub Pages)
+supabase/

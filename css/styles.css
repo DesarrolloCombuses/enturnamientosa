@@ -859,6 +859,225 @@ input:disabled,select:disabled{background:var(--bg-muted);color:var(--fg-soft);c
 .veh-base.is-mismatch{
   background:#ea580c;
 }
+.veh-sindesp{
+  display:inline-flex;
+  align-items:center;
+  padding:1px 8px;
+  border-radius:999px;
+  background:#dc2626;
+  color:#fff;
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.3px;
+}
+.veh-card.is-sindesp{
+  border-color:#dc2626;
+  background:linear-gradient(180deg, rgba(220,38,38,.08), rgba(220,38,38,.02));
+}
+.veh-card.is-sindesp .veh-pos{background:#dc2626}
+.veh-manual{
+  display:inline-flex;
+  align-items:center;
+  padding:1px 8px;
+  border-radius:999px;
+  background:#2563eb;
+  color:#fff;
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.3px;
+}
+.veh-card.is-manual{
+  border-color:#2563eb;
+  background:linear-gradient(180deg, rgba(37,99,235,.08), rgba(37,99,235,.02));
+}
+.veh-card.is-manual .veh-pos{background:#2563eb}
+
+/* Llegadas Aeropuerto en formato lista (tabla) */
+.ent-grupo{
+  margin-bottom:16px;
+  border:1px solid var(--line);
+  border-radius:var(--r-md);
+  overflow:hidden;
+  box-shadow:var(--shadow-sm);
+  background:var(--bg-elev);
+}
+.ent-grupo-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:8px 12px;
+  background:linear-gradient(180deg, rgba(0,120,212,.10), rgba(0,120,212,.03));
+  border-bottom:1px solid var(--line);
+}
+.ent-grupo-titulo{font-weight:800;color:var(--brand-strong)}
+.ent-grupo-count{font-size:12px;color:var(--fg-soft);font-weight:700}
+.ent-tabla{width:100%;border-collapse:collapse;font-size:13px}
+.ent-tabla thead th{
+  text-align:left;
+  padding:7px 12px;
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.4px;
+  color:var(--fg-soft);
+  background:var(--bg-muted);
+  border-bottom:1px solid var(--line);
+}
+.ent-tabla td{padding:7px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.ent-tabla tbody tr:last-child td{border-bottom:none}
+.ent-tabla tbody tr:nth-child(even){background:rgba(15,23,42,.02)}
+.ent-pos{font-weight:800;font-size:15px;color:var(--brand);width:36px;font-variant-numeric:tabular-nums}
+.ent-interno{font-weight:800;font-size:15px;color:#065f46}
+.ent-row-sindesp{background:rgba(220,38,38,.05) !important}
+.ent-row-manual{background:rgba(37,99,235,.05) !important}
+.ent-ok{color:#16a34a;font-weight:700;font-size:12px}
+/* Resalta el #1: el que lleva mas tiempo esperando = proximo a despachar */
+.ent-row-primero{background:rgba(22,163,74,.10) !important;box-shadow:inset 4px 0 0 #16a34a}
+.ent-pos-1{color:#16a34a}
+.turno-tag{
+  display:inline-flex;align-items:center;
+  padding:0 5px;border-radius:4px;
+  background:#e0e7ff;color:#3730a3;
+  font-size:10px;font-weight:800;
+}
+.veh-fuera{
+  display:inline-flex;align-items:center;padding:1px 8px;border-radius:999px;
+  background:#ea580c;color:#fff;font-size:10px;font-weight:800;letter-spacing:.3px;
+}
+.veh-noprog{
+  display:inline-flex;align-items:center;padding:1px 8px;border-radius:999px;
+  background:#64748b;color:#fff;font-size:10px;font-weight:800;letter-spacing:.3px;
+}
+.veh-prio{
+  display:inline-flex;
+  align-items:center;
+  padding:1px 8px;
+  border-radius:999px;
+  background:#7c3aed;
+  color:#fff;
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.3px;
+}
+.ent-prox{
+  font-size:9px;
+  font-weight:800;
+  color:#fff;
+  background:#16a34a;
+  border-radius:999px;
+  padding:1px 5px;
+  margin-top:2px;
+  letter-spacing:.3px;
+}
+
+/* Alerta de GPS sin reportar (en el mapa) */
+#sonarGpsAlert{
+  margin:0 0 10px 0;
+  padding:8px 12px;
+  border:1px solid #fca5a5;
+  border-left:4px solid #dc2626;
+  border-radius:var(--r-md);
+  background:#fef2f2;
+  color:#7f1d1d;
+  font-size:12.5px;
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:6px;
+}
+#sonarGpsAlert.hidden{display:none}
+.gps-stale-title{font-weight:800;color:#b91c1c}
+.gps-stale-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:2px 8px;
+  border-radius:999px;
+  background:#fff;
+  border:1px solid #fecaca;
+  color:#991b1b;
+  font-weight:600;
+  font-variant-numeric:tabular-nums;
+}
+.gps-stale-chip b{color:#dc2626}
+
+/* Etiqueta de número de vértice al dibujar una geocerca por puntos */
+.geocerca-pt-tip{
+  background:#7c3aed;
+  color:#fff;
+  border:none;
+  font-weight:800;
+  font-size:11px;
+  padding:1px 6px;
+  border-radius:999px;
+  box-shadow:0 1px 4px rgba(15,23,42,.4);
+}
+.geocerca-pt-tip::before{display:none}
+
+/* Lista de geocercas activas con boton eliminar */
+#geocercasList{
+  margin:0 0 10px 0;
+  padding:8px 12px;
+  border:1px solid var(--line);
+  border-left:4px solid #7c3aed;
+  border-radius:var(--r-md);
+  background:#faf5ff;
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px;
+  font-size:12.5px;
+}
+#geocercasList.hidden{display:none}
+.geocerca-list-title{font-weight:800;color:#6d28d9}
+.geocerca-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:3px 6px 3px 10px;
+  border-radius:999px;
+  background:#fff;
+  border:1px solid #ddd6fe;
+  color:#4c1d95;
+}
+.geocerca-chip-meta{color:var(--fg-soft);font-size:11px}
+.geocerca-chip-del{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:20px;height:20px;
+  border:none;
+  border-radius:50%;
+  background:#ede9fe;
+  color:#7c3aed;
+  font-weight:800;
+  cursor:pointer;
+  line-height:1;
+}
+.geocerca-chip-del:hover{background:#dc2626;color:#fff}
+
+/* Selector multiple de itinerarios en el formulario de geocerca */
+.geocerca-itin-wrap{display:inline-flex;flex-direction:column;gap:3px}
+.geocerca-itin-head{display:flex;align-items:center;gap:8px}
+.geocerca-itin-link{
+  background:none;border:none;color:var(--brand);cursor:pointer;
+  font-size:11px;font-weight:700;padding:0;text-decoration:underline;
+}
+.geocerca-itin-box{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:2px 12px;
+  max-height:120px;
+  overflow:auto;
+  padding:6px 8px;
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:var(--r-sm,8px);
+}
+.geocerca-itin-item{
+  display:flex;align-items:center;gap:5px;
+  font-size:12px;white-space:nowrap;cursor:pointer;
+}
+.geocerca-itin-item input{margin:0}
 
 /* =============== Tabla llegadas: grilla por itinerario =============== */
 .itinerario-grid{
@@ -1187,3 +1406,469 @@ input:disabled,select:disabled{background:var(--bg-muted);color:var(--fg-soft);c
 .prog-filas-table tbody tr:nth-child(even):not(.is-selected) td{
   background:rgba(0,0,0,0.02);
 }
+
+/* ============================================================
+   REFINAMIENTO ESTÉTICO (capa superior, no destructiva)
+   ============================================================ */
+
+/* --- Fondo general con leve profundidad --- */
+body{
+  background:
+    radial-gradient(1200px 480px at 100% -10%, rgba(0,120,212,.06), rgba(0,120,212,0) 60%),
+    radial-gradient(900px 420px at -10% 0%, rgba(0,120,212,.05), rgba(0,120,212,0) 55%),
+    var(--bg);
+  background-attachment:fixed;
+}
+
+/* --- Marca en la barra superior --- */
+.brand{
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  padding-right:6px;
+  margin-right:2px;
+}
+.brand-mark{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:36px;
+  height:36px;
+  border-radius:10px;
+  background:linear-gradient(135deg, var(--brand) 0%, var(--brand-strong) 100%);
+  color:#fff;
+  font-weight:800;
+  font-size:18px;
+  letter-spacing:-0.02em;
+  box-shadow:0 4px 10px rgba(0,120,212,.30), inset 0 1px 0 rgba(255,255,255,.25);
+  flex:none;
+}
+.brand-text{display:flex;flex-direction:column;line-height:1.05}
+.brand-text strong{
+  font-size:15px;
+  font-weight:800;
+  letter-spacing:-0.01em;
+  color:var(--fg);
+}
+.brand-text small{
+  font-size:10.5px;
+  font-weight:600;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--fg-soft);
+}
+
+/* --- Barra superior con sutil gradiente y borde de acento --- */
+.topbar{
+  background:linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  border-top:3px solid var(--brand);
+  box-shadow:var(--shadow-md);
+}
+
+/* --- Botón primario con gradiente y brillo --- */
+.btn-primary{
+  background:linear-gradient(180deg, #1487e0 0%, var(--brand) 55%, var(--brand-strong) 100%);
+  box-shadow:0 2px 6px rgba(0,120,212,.25), inset 0 1px 0 rgba(255,255,255,.18);
+}
+.btn-primary:hover{
+  background:linear-gradient(180deg, var(--brand) 0%, var(--brand-strong) 100%);
+  box-shadow:0 4px 12px rgba(0,120,212,.32), inset 0 1px 0 rgba(255,255,255,.18);
+}
+.btn-success{
+  background:linear-gradient(180deg, #1bb255 0%, var(--ok) 60%, #15803d 100%);
+  box-shadow:0 2px 6px rgba(22,163,74,.24), inset 0 1px 0 rgba(255,255,255,.18);
+}
+.btn-danger{
+  background:linear-gradient(180deg, #ef4444 0%, var(--err) 60%, #b91c1c 100%);
+  box-shadow:0 2px 6px rgba(220,38,38,.24), inset 0 1px 0 rgba(255,255,255,.18);
+}
+
+/* --- Pestaña activa con gradiente y leve elevación --- */
+.tab.active{
+  background:linear-gradient(180deg, var(--brand) 0%, var(--brand-strong) 100%);
+  box-shadow:0 3px 8px rgba(0,120,212,.28);
+  transform:translateY(-1px);
+}
+
+/* --- Cards: acento al pasar el mouse y transición suave --- */
+.card{transition:box-shadow .18s ease, border-color .18s ease}
+#operativoInner > .card:hover{box-shadow:var(--shadow-md)}
+
+/* --- Tablas: filas zebra + cabecera más nítida + hover marcado --- */
+tbody tr:nth-child(even) td{background:rgba(15,23,42,.022)}
+tbody tr:hover td{background:var(--brand-soft) !important}
+th{
+  background:linear-gradient(180deg, #f3f7fb 0%, var(--bg-muted) 100%);
+  box-shadow:inset 0 -1px 0 var(--line-strong);
+}
+
+/* --- Chips activos con gradiente coherente --- */
+.chip.active{
+  background:linear-gradient(180deg, var(--brand) 0%, var(--brand-strong) 100%);
+  box-shadow:0 2px 6px rgba(0,120,212,.24);
+}
+
+/* --- Pill de usuario más refinada --- */
+.pill{
+  background:linear-gradient(180deg, #f0f7fe 0%, var(--brand-soft) 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.6);
+}
+
+/* --- Scrollbars sutiles (WebKit) --- */
+*::-webkit-scrollbar{width:11px;height:11px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{
+  background:var(--line-strong);
+  border-radius:999px;
+  border:3px solid transparent;
+  background-clip:content-box;
+}
+*::-webkit-scrollbar-thumb:hover{
+  background:var(--fg-soft);
+  background-clip:content-box;
+}
+
+/* --- Título de sección con franja de acento --- */
+#operativoMainTitle{
+  position:relative;
+  padding-left:14px;
+}
+#operativoMainTitle::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:50%;
+  transform:translateY(-50%);
+  width:5px;
+  height:22px;
+  border-radius:999px;
+  background:linear-gradient(180deg, var(--brand) 0%, var(--brand-strong) 100%);
+}
+
+/* --- Entrada suave de filas al renderizar --- */
+@keyframes rowIn{from{opacity:0}to{opacity:1}}
+.tab-content.active tbody tr{animation:rowIn .18s ease both}
+
+/* --- Mapa en pantalla completa (estilo YouTube) --- */
+#mapaVehiculosContainer:fullscreen{
+  width:100%;
+  height:100%;
+  border-radius:0;
+  border:0;
+}
+#mapaVehiculosContainer:-webkit-full-screen{
+  width:100%;
+  height:100%;
+  border-radius:0;
+  border:0;
+}
+
+/* --- Mapa flotante (picture-in-picture) --- */
+.mapa-floating{
+  position:fixed;
+  right:20px;
+  bottom:20px;
+  width:460px;
+  height:340px;
+  min-width:280px;
+  min-height:220px;
+  z-index:9500;
+  background:var(--bg-elev);
+  border:1px solid var(--line-strong);
+  border-radius:var(--r-md);
+  box-shadow:var(--shadow-lg);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  resize:both;
+}
+.mapa-floating.hidden{display:none !important}
+.mapa-floating-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:7px 10px;
+  background:linear-gradient(180deg, var(--brand) 0%, var(--brand-strong) 100%);
+  color:#fff;
+  font-size:12.5px;
+  font-weight:700;
+  cursor:move;
+  user-select:none;
+}
+.mapa-floating-actions{display:inline-flex;gap:6px}
+.mapa-floating-header button{
+  border:0;
+  background:rgba(255,255,255,.18);
+  color:#fff;
+  border-radius:6px;
+  padding:3px 9px;
+  font-size:12px;
+  font-weight:700;
+  cursor:pointer;
+}
+.mapa-floating-header button:hover{background:rgba(255,255,255,.32)}
+#mapaFloatingBody{flex:1;min-height:0;position:relative}
+/* Cuando el mapa esta flotando, su contenedor llena la ventanita */
+#mapaVehiculosContainer.is-floating{
+  height:100% !important;
+  min-height:0 !important;
+  border:0 !important;
+  border-radius:0 !important;
+}
+
+/* --- Marca compacta en móvil (solo el logo) --- */
+@media (max-width: 860px){
+  .brand-text{display:none}
+  .brand{margin-right:0}
+  .brand-mark{width:34px;height:34px}
+}
+
+/* ===================== GUÍA AL USUARIO (nunca perderse) ===================== */
+/* Tira de pasos del flujo de despacho */
+.guia-pasos{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:stretch;
+  gap:6px;
+  margin:0 0 10px 0;
+  padding:10px 12px;
+  background:linear-gradient(180deg,#f8fafc,#eef2f7);
+  border:1px solid #e2e8f0;
+  border-radius:10px;
+}
+.guia-paso{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex:1 1 160px;
+  min-width:150px;
+  padding:6px 10px;
+  background:#fff;
+  border:1px solid #e5e9f0;
+  border-radius:8px;
+}
+.guia-num{
+  flex:0 0 auto;
+  width:22px;height:22px;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:var(--brand,#0b5); color:#fff;
+  border-radius:50%; font-weight:800; font-size:12px;
+}
+.guia-txt{font-size:12px;line-height:1.25;color:#334155}
+.guia-txt b{color:#0f172a}
+.guia-flecha{align-self:center;color:#94a3b8;font-weight:800;padding:0 2px}
+@media (max-width:860px){
+  .guia-flecha{display:none}
+  .guia-paso{flex:1 1 100%}
+}
+
+/* Estado vacío instructivo */
+.lista-vacia{
+  text-align:center;
+  padding:26px 18px;
+  color:#64748b;
+}
+.lista-vacia-icon{font-size:30px;margin-bottom:6px;opacity:.8}
+.lista-vacia-title{font-weight:700;color:#334155;margin-bottom:4px}
+.lista-vacia-sub{font-size:13px;max-width:520px;margin:0 auto;line-height:1.4}
+.lista-vacia-sub b{color:#0f172a}
+
+/* ============================================================
+   MODO OSCURO — estilo tipo editor (VS Code): grises neutros,
+   plano, bordes finos, sin brillos ni degradados.
+   ============================================================ */
+html[data-theme="dark"]{
+  /* superficies (grises neutros, escalonadas como un IDE) */
+  --bg:#1e1e1e;
+  --bg-elev:#252526;
+  --bg-muted:#2d2d30;
+  --line:#3c3c3c;
+  --line-strong:#4d4d4d;
+
+  /* texto */
+  --fg:#d4d4d4;
+  --fg-muted:#b4b4b4;
+  --fg-soft:#8a8a8a;
+  --fg-inverse:#1e1e1e;
+
+  /* marca (azul VS Code legible sobre gris) */
+  --brand:#4ea1ff;
+  --brand-strong:#6cb2ff;
+  --brand-soft:#1e3a52;
+  --brand-ring:rgba(78,161,255,.35);
+
+  /* semánticos (tenues, no chillones) */
+  --ok:#4ec9b0;  --ok-soft:#183a33;
+  --warn:#dcb667;--warn-soft:#3a2f12;
+  --err:#f28b82; --err-soft:#3a1e1c;
+  --info:#4ea1ff;--info-soft:#1e3550;
+
+  /* sombras casi planas: la separación la dan los bordes */
+  --shadow-sm:0 1px 2px rgba(0,0,0,.35);
+  --shadow-md:0 4px 12px rgba(0,0,0,.4);
+  --shadow-lg:0 12px 28px rgba(0,0,0,.5);
+
+  color-scheme:dark;
+}
+/* Fondo plano, sin brillos */
+html[data-theme="dark"] body{background:var(--bg)}
+
+/* --- Barra superior: sólida, con fina línea de acento --- */
+html[data-theme="dark"] .topbar{
+  background:var(--bg-elev);
+  border:1px solid var(--line);
+  border-top:2px solid var(--brand);
+  box-shadow:none;
+}
+html[data-theme="dark"] .brand-mark{
+  background:#0e639c;
+  box-shadow:none;
+}
+
+/* --- Barra de pestañas y pestaña activa (plano tipo IDE) --- */
+html[data-theme="dark"] .tabs{background:var(--bg-elev);border-color:var(--line);box-shadow:none}
+html[data-theme="dark"] .tab:hover{background:#2a2d2e;color:var(--fg)}
+html[data-theme="dark"] .tab.active{
+  background:#094771;
+  color:#fff;
+  border-color:#0e639c;
+  box-shadow:none;
+  transform:none;
+}
+
+/* --- Botón primario: plano, azul VS Code --- */
+html[data-theme="dark"] .btn-primary{
+  background:#0e639c;
+  border-color:#0e639c;
+  box-shadow:none;
+}
+html[data-theme="dark"] .btn-primary:hover{background:#1177bb;border-color:#1177bb;box-shadow:none}
+html[data-theme="dark"] .btn-ghost{background:var(--bg-muted);border-color:var(--line);color:var(--fg)}
+html[data-theme="dark"] .btn-ghost:hover{background:#37373d;border-color:var(--line-strong)}
+
+/* --- Cards planas --- */
+html[data-theme="dark"] .card{box-shadow:none}
+html[data-theme="dark"] #operativoInner > .card:hover{box-shadow:none}
+
+/* --- Tablas planas --- */
+html[data-theme="dark"] th{
+  background:var(--bg-muted);
+  box-shadow:inset 0 -1px 0 var(--line);
+  color:var(--fg-muted);
+}
+html[data-theme="dark"] tbody tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+html[data-theme="dark"] tbody tr:hover td{background:#2a2d2e !important}
+
+/* --- Lista de llegadas (FIFO) --- */
+html[data-theme="dark"] .ent-grupo{background:var(--bg-elev);border-color:var(--line);box-shadow:none}
+html[data-theme="dark"] .ent-grupo-head{background:#2d2d30;border-color:var(--line)}
+html[data-theme="dark"] .ent-grupo-titulo{color:var(--brand)}
+html[data-theme="dark"] .ent-tabla thead th{background:var(--bg-muted);color:var(--fg-soft)}
+html[data-theme="dark"] .ent-tabla tbody tr:nth-child(even){background:rgba(255,255,255,.02)}
+html[data-theme="dark"] .ent-interno{color:var(--ok)}
+html[data-theme="dark"] .ent-ok{color:var(--ok)}
+html[data-theme="dark"] .ent-pos-1{color:var(--ok)}
+html[data-theme="dark"] .ent-row-primero{background:rgba(78,201,176,.12) !important;box-shadow:inset 4px 0 0 var(--ok)}
+html[data-theme="dark"] .ent-row-sindesp{background:rgba(242,139,130,.10) !important}
+html[data-theme="dark"] .ent-row-manual{background:rgba(78,161,255,.10) !important}
+html[data-theme="dark"] .turno-tag{background:#37373d;color:#c7d2fe}
+
+/* --- Guía de pasos y estado vacío (plano) --- */
+html[data-theme="dark"] .guia-pasos{background:var(--bg-elev);border-color:var(--line)}
+html[data-theme="dark"] .guia-paso{background:var(--bg-muted);border-color:var(--line)}
+html[data-theme="dark"] .guia-txt{color:var(--fg-muted)}
+html[data-theme="dark"] .guia-txt b{color:var(--fg)}
+html[data-theme="dark"] .guia-flecha{color:var(--fg-soft)}
+html[data-theme="dark"] .lista-vacia{color:var(--fg-soft)}
+html[data-theme="dark"] .lista-vacia-title{color:var(--fg-muted)}
+html[data-theme="dark"] .lista-vacia-sub b{color:var(--fg)}
+
+/* --- Pill de usuario (plana) --- */
+html[data-theme="dark"] .pill{
+  background:var(--bg-muted);
+  border-color:var(--line);
+  color:var(--fg);
+  box-shadow:none;
+}
+
+/* --- Chips de filtro --- */
+html[data-theme="dark"] .chip.active{background:#094771;border-color:#0e639c;box-shadow:none}
+
+/* --- Inputs (refuerzo) --- */
+html[data-theme="dark"] input:hover,
+html[data-theme="dark"] select:hover,
+html[data-theme="dark"] textarea:hover{border-color:var(--line-strong)}
+
+/* --- Cabecera de sección: barra de acento sólida --- */
+html[data-theme="dark"] #operativoMainTitle::before{background:var(--brand)}
+
+/* --- Botón del interruptor de tema --- */
+#btnThemeToggle{min-width:40px;justify-content:center;font-size:16px;padding:9px 12px;line-height:1}
+
+/* --- Notas de ayuda dentro del modal de agregar manual --- */
+.ent-modal-hint{font-size:11.5px;line-height:1.35;margin-top:4px}
+.ent-modal-preview{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#enturnoManualModal .modal-card{width:min(96vw,560px)}
+
+/* --- Botón "Editar geocercas" (bloqueo para no borrar por accidente) --- */
+.btn-geocercas-edit{
+  border:1px solid var(--line-strong);
+  background:var(--bg-elev);
+  color:var(--fg-muted);
+  border-radius:var(--r-pill);
+  padding:3px 10px;
+  font-size:11.5px;
+  font-weight:700;
+  cursor:pointer;
+  margin-left:4px;
+}
+.btn-geocercas-edit:hover{border-color:var(--brand);color:var(--brand)}
+.btn-geocercas-edit.is-on{
+  background:var(--warn-soft);
+  border-color:var(--warn);
+  color:var(--warn);
+}
+html[data-theme="dark"] .btn-geocercas-edit{background:var(--bg-muted)}
+
+/* Planilla: fila de despacho cancelado (se ve igual que las demas, editable;
+   solo la etiqueta roja indica que fue cancelado). */
+tr.pd-cancelado > td{
+  background:rgba(185,28,28,0.04);
+}
+.pd-badge-canc{
+  display:inline-block;
+  background:#b91c1c;
+  color:#fff;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.3px;
+  padding:1px 6px;
+  border-radius:4px;
+  margin-right:6px;
+  vertical-align:middle;
+}
+html[data-theme="dark"] tr.pd-cancelado > td{background:rgba(185,28,28,0.10)}
+
+/* Cumplimiento: etiquetas de estado */
+.cump-badge{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.3px;padding:2px 8px;border-radius:5px;color:#fff}
+.cump-badge.cump-ok{background:#047857}
+.cump-badge.cump-nolabor{background:#b91c1c}
+.cump-badge.cump-ficho{background:#c2410c}
+.cump-badge.cump-incompleto{background:#a16207}
+.cump-badge.cump-pend{background:#2563eb}
+
+/* Chips de selección de carros en el mapa */
+.mapa-chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg-elev);border:1px solid var(--line);border-radius:999px;padding:3px 6px 3px 10px;font-size:12px;cursor:pointer}
+.mapa-chip:hover{border-color:var(--brand)}
+.mapa-chip-dot{width:9px;height:9px;border-radius:50%;flex:none}
+.mapa-chip-est{color:var(--fg-soft);font-size:11px}
+.mapa-chip-x{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--bg-muted);color:var(--fg-soft);font-weight:700;line-height:1}
+.mapa-chip-x:hover{background:#dc2626;color:#fff}
+.mapa-filtro-item{display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:6px;cursor:pointer;font-size:13px}
+.mapa-filtro-item:hover{background:var(--bg-muted)}
+.mapa-filtro-item input{cursor:pointer}
+
+/* Píldora de versión de la app */
+.pill.app-version{cursor:pointer;font-variant-numeric:tabular-nums;opacity:.85}
+.pill.app-version:hover{opacity:1;border-color:var(--brand);color:var(--brand)}

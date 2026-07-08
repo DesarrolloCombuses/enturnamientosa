@@ -8,6 +8,17 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0078d4">
 
+<!-- Tema claro/oscuro: se aplica ANTES de pintar para evitar parpadeo -->
+<script>
+  (function(){
+    try{
+      var t = localStorage.getItem('ui-theme');
+      if(!t){ t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+      document.documentElement.setAttribute('data-theme', t);
+    }catch(e){ document.documentElement.setAttribute('data-theme','light'); }
+  })();
+</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
@@ -62,10 +73,18 @@ n" href="icons/icon-192.svg">
   <!-- TOP BAR -->
   <div class="topbar">
     <div class="row">
-      <button class="btn btn-primary" id="btnGoLlegadasVehiculos">Panel de llegadas vehiculos</button>
+      <div class="brand" aria-label="Combuses">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span class="brand-text">
+          <strong>Combuses</strong>
+          <small>Planilla de Enturnamiento</small>
+        </span>
+      </div>
     </div>
     <div class="row">
       <button class="btn btn-success" id="btnManualDispatch">Despacho manual</button>
+      <button class="btn btn-ghost" id="btnThemeToggle" title="Cambiar modo claro/oscuro" aria-label="Cambiar modo claro/oscuro">🌙</button>
+      <span class="pill app-version" id="appVersion" title="Versión de la aplicación (toca para buscar actualización)">v—</span>
       <span class="pill" id="authUserLabel">No autenticado</span>
       <button class="btn btn-danger hidden" id="btnLogout">Cerrar sesion</button>
     </div>
@@ -82,325 +101,36 @@ n" href="icons/icon-192.svg">
       <!-- Columna izquierda: Pestanas -->
       <div class="card">
         <div class="tabs">
-          <div class="tab hidden" data-tab="planilla-afiliados">Tabla planilla</div>
-          <div class="tab" data-tab="llegadas-aeropuerto">Llegadas Aeropuerto</div>
-          <div class="tab" data-tab="llegadas-terminalnorte">Llegadas Terminalnorte</div>
-          <div class="tab" data-tab="llegadas-san-diego">Llegadas Almacentro</div>
-          <div class="tab" data-tab="llegadas-nutibara">Llegadas Nutibara</div>
-          <div class="tab" data-tab="no-despacho">No tuvieron despacho</div>
-          <div class="tab" data-tab="fuera-lista">Fuera de lista</div>
-          <div class="tab" data-tab="vehiculos-sonar">Vehiculos Sonar</div>
+          <div class="tab hidden" data-tab="vehiculos-sonar">Vehiculos Sonar</div>
           <div class="tab" data-tab="despachos-sonar">Despachos Sonar</div>
           <div class="tab active" data-tab="mapa-vehiculos">Mapa vehiculos</div>
-          <div class="tab" data-tab="tabla-llegadas">Tabla llegadas</div>
+          <div class="tab" data-tab="alertas-gps">Alertas GPS <span id="gpsDescTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
+          <div class="tab" data-tab="enturnamiento">Llegadas Aeropuerto</div>
+          <div class="tab" data-tab="llegadas-almacentro-geo">Llegadas Almacentro</div>
+          <div class="tab hidden" data-tab="llegadas-exposiciones-geo">Llegadas Exposiciones</div>
+          <div class="tab hidden" data-tab="salidas-aeropuerto">Salidas Aeropuerto</div>
+          <div class="tab" data-tab="auditoria-manual">Auditoría manual</div>
           <div class="tab" data-tab="historial-despachos">Historial despachos</div>
+          <div class="tab" data-tab="planilla-despachos">Planilla Almacentro</div>
+          <div class="tab" data-tab="planilla-despachos-sandiego">Planilla CC San Diego</div>
+          <div class="tab" data-tab="planilla-despachos-expo">Planilla Exposiciones</div>
+          <div class="tab" data-tab="despachos-aeropuerto">Despachos Aeropuerto</div>
           <div class="tab" data-tab="asistencia-biometrica">Asistencia biometrica</div>
           <div class="tab" data-tab="conductores-csv">Conductores CSV</div>
           <div class="tab" data-tab="preop-sicov">Preoperacionales SICOV</div>
           <div class="tab" data-tab="programacion-filas">Programacion filas</div>
-          <div class="tab" data-tab="tabla-vehiculossonar">Tabla vehiculossonar</div>
+          <div class="tab" data-tab="vista-excel">Programaciones Vista Excel</div>
+          <div class="tab" data-tab="cumplimiento">Cumplimiento</div>
+          <div class="tab" data-tab="vuelos">Vuelos MDE</div>
+          <div class="tab" data-tab="asistencias">Asistencias</div>
+          <div class="tab" data-tab="informe-flota">Informe Flota</div>
+          <div class="tab hidden" data-tab="tabla-vehiculossonar">Tabla vehiculossonar</div>
         </div>
         <div class="mobile-tab-switcher" id="mobileTabSwitcher">
           <label for="mobileTabSelect">Seccion</label>
           <select id="mobileTabSelect" aria-label="Cambiar seccion"></select>
         </div>
 
-        <!-- Contenido Planilla Afiliados -->
-        <div id="tab-planilla-afiliados" class="tab-content">
-          <div class="row planilla-toolbar" style="margin-bottom:10px">
-            <select id="planillaTableSource" title="Fuente de datos">
-              <option value="planilla_afiliados_2">planilla_afiliados_2</option>
-            </select>
-            <input id="planillaFilterInterno" type="text" placeholder="Filtrar interno..." />
-            <input id="planillaFilterBase" type="text" placeholder="Filtrar base..." />
-            <select id="planillaFilterTipo">
-              <option value="">Todos los tipos</option>
-              <option value="Llegada Aeropuerto">Llegada Aeropuerto</option>
-              <option value="Llegada San Diego">Llegada Almacentro</option>
-              <option value="Llegada Nutibara">Llegada Nutibara</option>
-            </select>
-            <input id="planillaFilterHoraLlegada" type="text" placeholder="Filtrar hora llegada..." />
-            <button class="btn btn-ghost" id="btnRefreshPlanilla">Actualizar planilla</button>
-            <button class="btn btn-success" id="btnDownloadLlegadas">Descargar llegadas</button>
-            <button class="btn btn-success" id="btnDownloadDespachos">Descargar despachos</button>
-            <span class="muted">Registros: <strong id="planillaCount">0</strong></span>
-            <span class="muted" id="planillaStatus">Sin cargar</span>
-          </div>
-          <div class="planilla-wrap" style="overflow:auto;max-height:60vh">
-            <table id="planillaTable">
-              <thead id="planillaHead"></thead>
-              <tbody id="planillaBody">
-                <tr><td class="muted" style="text-align:center;padding:12px">Sin datos.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Contenido Llegadas Aeropuerto -->
-        <div id="tab-llegadas-aeropuerto" class="tab-content">
-          <div class="row mobile-filters" style="margin-bottom:10px">
-            <h3 id="llegadasAeropuertoTitle" style="margin:0">Ultimas Llegadas Aeropuerto (104)</h3>
-            <button class="btn btn-ghost" id="btnRefreshLlegadasAeropuerto">Actualizar</button>
-            <input id="aeropuertoSearch" type="text" placeholder="Buscar en todos los campos..." />
-            <select id="aeropuertoEstadoFilter">
-              <option value="">Todos</option>
-              <option value="en_espera">En espera</option>
-              <option value="despachado">Despachados</option>
-            </select>
-            <select id="aeropuertoBaseFilter">
-              <option value="">Todas las bases</option>
-            </select>
-            <label class="consulta-mini" for="aeropuertoUploadFrom">Subida desde</label>
-            <input id="aeropuertoUploadFrom" type="date" />
-            <label class="consulta-mini" for="aeropuertoUploadTo">hasta</label>
-            <input id="aeropuertoUploadTo" type="date" />
-            <button class="btn btn-success" id="btnDownloadLlegadasAeropuerto">Descargar aeropuerto</button>
-            <span class="muted">Registros: <strong id="llegadasAeropuertoCount">0</strong></span>
-            <span class="muted" id="llegadasAeropuertoStatus">Sin cargar</span>
-          </div>
-          <div class="muted" style="margin:0 0 10px 0">
-            Hora: hora de llegada al destino de esta pestana. Se muestran separados: itinerario de llegada e itinerario de despacho.
-          </div>
-          <div id="llegadasAeropuertoTabs" class="row" style="margin-bottom:10px;gap:6px;flex-wrap:wrap"></div>
-          <div style="overflow:auto;max-height:60vh">
-            <table id="llegadasAeropuertoTable">
-              <thead>
-                <tr>
-                  <th>Hora ultima llegada Aeropuerto</th>
-                  <th>Despacho</th>
-                  <th>Estado</th>
-                  <th>Base</th>
-                  <th>Interno</th>
-                  <th>Itinerario llegada</th>
-                  <th>Itinerario despacho</th>
-                  <th>Accion</th>
-                </tr>
-              </thead>
-              <tbody id="llegadasAeropuertoBody">
-                <tr><td colspan="8" class="muted" style="text-align:center;padding:12px">Sin datos.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Contenido Llegadas Terminalnorte -->
-        <div id="tab-llegadas-terminalnorte" class="tab-content">
-          <div class="row mobile-filters" style="margin-bottom:10px">
-            <h3 id="llegadasTerminalNorteTitle" style="margin:0">Ultimas Llegadas Terminalnorte</h3>
-            <button class="btn btn-ghost" id="btnRefreshLlegadasTerminalNorte">Actualizar</button>
-            <input id="terminalNorteSearch" type="text" placeholder="Buscar en todos los campos..." />
-            <select id="terminalNorteEstadoFilter">
-              <option value="">Todos</option>
-              <option value="en_espera">En espera</option>
-              <option value="despachado">Despachados</option>
-            </select>
-            <select id="terminalNorteBaseFilter">
-              <option value="">Todas las bases</option>
-            </select>
-            <label class="consulta-mini" for="terminalNorteUploadFrom">Subida desde</label>
-            <input id="terminalNorteUploadFrom" type="date" />
-            <label class="consulta-mini" for="terminalNorteUploadTo">hasta</label>
-            <input id="terminalNorteUploadTo" type="date" />
-            <button class="btn btn-success" id="btnDownloadLlegadasTerminalNorte">Descargar terminalnorte</button>
-            <span class="muted">Registros: <strong id="llegadasTerminalNorteCount">0</strong></span>
-            <span class="muted" id="llegadasTerminalNorteStatus">Sin cargar</span>
-          </div>
-          <div class="muted" style="margin:0 0 10px 0">
-            Hora: hora de llegada al destino de esta pestana. Se muestran separados: itinerario de llegada e itinerario de despacho.
-          </div>
-          <div style="overflow:auto;max-height:60vh">
-            <table id="llegadasTerminalNorteTable">
-              <thead>
-                <tr>
-                  <th>Hora ultima llegada Terminalnorte</th>
-                  <th>Despacho</th>
-                  <th>Estado</th>
-                  <th>Base</th>
-                  <th>Interno</th>
-                  <th>Itinerario llegada</th>
-                  <th>Itinerario despacho</th>
-                  <th>Accion</th>
-                </tr>
-              </thead>
-              <tbody id="llegadasTerminalNorteBody">
-                <tr><td colspan="8" class="muted" style="text-align:center;padding:12px">Sin datos.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Contenido Llegadas Almacentro -->
-        <div id="tab-llegadas-san-diego" class="tab-content">
-          <div class="row mobile-filters" style="margin-bottom:10px">
-            <h3 id="llegadasSanDiegoTitle" style="margin:0">Ultimas Llegadas Almacentro (101)</h3>
-            <button class="btn btn-ghost" id="btnRefreshLlegadasSanDiego">Actualizar</button>
-            <input id="sanDiegoSearch" type="text" placeholder="Buscar en todos los campos..." />
-            <select id="sanDiegoEstadoFilter">
-              <option value="">Todos</option>
-              <option value="en_espera">En espera</option>
-              <option value="despachado">Despachados</option>
-            </select>
-            <select id="sanDiegoBaseFilter">
-              <option value="">Todas las bases</option>
-            </select>
-            <label class="consulta-mini" for="sanDiegoUploadFrom">Subida desde</label>
-            <input id="sanDiegoUploadFrom" type="date" />
-            <label class="consulta-mini" for="sanDiegoUploadTo">hasta</label>
-            <input id="sanDiegoUploadTo" type="date" />
-            <button class="btn btn-success" id="btnDownloadLlegadasSanDiego">Descargar Almacentro</button>
-            <span class="muted">Registros: <strong id="llegadasSanDiegoCount">0</strong></span>
-            <span class="muted" id="llegadasSanDiegoStatus">Sin cargar</span>
-          </div>
-          <div class="muted" style="margin:0 0 10px 0">
-            Hora: hora de llegada al destino de esta pestana. Se muestran separados: itinerario de llegada e itinerario de despacho.
-          </div>
-          <div id="llegadasSanDiegoTabs" class="row" style="margin-bottom:10px;gap:6px;flex-wrap:wrap"></div>
-          <div style="overflow:auto;max-height:60vh">
-            <table id="llegadasSanDiegoTable">
-              <thead>
-                <tr>
-                  <th>Hora ultima llegada Almacentro</th>
-                  <th>Despacho</th>
-                  <th>Estado</th>
-                  <th>Base</th>
-                  <th>Interno</th>
-                  <th>Itinerario llegada</th>
-                  <th>Itinerario despacho</th>
-                  <th>Accion</th>
-                </tr>
-              </thead>
-              <tbody id="llegadasSanDiegoBody">
-                <tr><td colspan="8" class="muted" style="text-align:center;padding:12px">Sin datos.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Contenido Llegadas Nutibara -->
-        <div id="tab-llegadas-nutibara" class="tab-content">
-          <div class="row mobile-filters" style="margin-bottom:10px">
-            <h3 id="llegadasNutibaraTitle" style="margin:0">Ultimas Llegadas Nutibara (110)</h3>
-            <button class="btn btn-ghost" id="btnRefreshLlegadasNutibara">Actualizar</button>
-            <input id="nutibaraSearch" type="text" placeholder="Buscar en todos los campos..." />
-            <select id="nutibaraEstadoFilter">
-              <option value="">Todos</option>
-              <option value="en_espera">En espera</option>
-              <option value="despachado">Despachados</option>
-            </select>
-            <select id="nutibaraBaseFilter">
-              <option value="">Todas las bases</option>
-            </select>
-            <label class="consulta-mini" for="nutibaraUploadFrom">Subida desde</label>
-            <input id="nutibaraUploadFrom" type="date" />
-            <label class="consulta-mini" for="nutibaraUploadTo">hasta</label>
-            <input id="nutibaraUploadTo" type="date" />
-            <button class="btn btn-success" id="btnDownloadLlegadasNutibara">Descargar Nutibara</button>
-            <span class="muted">Registros: <strong id="llegadasNutibaraCount">0</strong></span>
-            <span class="muted" id="llegadasNutibaraStatus">Sin cargar</span>
-          </div>
-          <div class="muted" style="margin:0 0 10px 0">
-            Hora: hora de llegada al destino de esta pestana. Se muestran separados: itinerario de llegada e itinerario de despacho.
-          </div>
-          <div id="llegadasNutibaraTabs" class="row" style="margin-bottom:10px;gap:6px;flex-wrap:wrap"></div>
-          <div style="overflow:auto;max-height:60vh">
-            <table id="llegadasNutibaraTable">
-              <thead>
-                <tr>
-                  <th>Hora ultima llegada Nutibara</th>
-                  <th>Despacho</th>
-                  <th>Estado</th>
-                  <th>Base</th>
-                  <th>Interno</th>
-                  <th>Itinerario llegada</th>
-                  <th>Itinerario despacho</th>
-                  <th>Accion</th>
-                </tr>
-              </thead>
-              <tbody id="llegadasNutibaraBody">
-                <tr><td colspan="8" class="muted" style="text-align:center;padding:12px">Sin datos.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Contenido No tuvieron despacho -->
-        <div id="tab-no-despacho" class="tab-content">
-          <div class="row mobile-filters" style="margin-bottom:10px">
-            <h3 id="noDespachoTitle" style="margin:0">Vehiculos sin despacho (3 h 30 min)</h3>
-            <button class="btn btn-ghost" id="btnRefreshNoDespacho">Actualizar</button>
-            <input id="noDespachoSearch" type="text" placeholder="Buscar en todos los campos..." />
-            <select id="noDespachoPuntoFilter">
-              <option value="">Todos los puntos</option>
-              <option value="aeropuerto">Aeropuerto</option>
-              <option value="terminalnorte">Terminalnorte</option>
-              <option value="sandiego">Almacentro</option>
-              <option value="nutibara">Nutibara</option>
-            </select>
-            <select id="noDespachoBaseFilter">
-              <option value="">Todas las bases</option>
-            </select>
-            <label class="consulta-mini" for="noDespachoFrom">Subida desde</label>
-            <input id="noDespachoFrom" type="date" />
-            <label class="consulta-mini" for="noDespachoTo">hasta</label>
-            <input id="noDespachoTo" type="date" />
-            <span class="muted">Registros: <strong id="noDespachoCount">0</strong></span>
-            <span class="muted" id="noDespachoStatus">Sin cargar</span>
-          </div>
-          <div style="overflow:auto;max-height:62vh">
-            <table id="noDespachoTable">
-              <thead>
-                <tr>
-                  <th>Punto</th>
-                  <th>Hora ultima llegada</th>
-                  <th>Despacho</th>
-                  <th>Estado</th>
-                  <th>Base</th>
-                  <th>Interno</th>
-                  <th>Itinerario llegada</th>
-                  <th>Itinerario despacho</th>
-                  <th>Motivo</th>
-                  <th>Accion</th>
-                </tr>
-              </thead>
-              <tbody id="noDespachoBody">
-                <tr><td colspan="10" class="muted" style="text-align:center;padding:12px">Sin datos.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Contenido Fuera de lista -->
-        <div id="tab-fuera-lista" class="tab-content">
-          <div class="row" style="margin-bottom:10px">
-            <h3 style="margin:0">Vehiculos retirados de la lista</h3>
-            <input id="fueraListaSearch" type="text" placeholder="Buscar en lista local..." />
-            <span class="muted">Registros: <strong id="fueraListaCount">0</strong></span>
-            <span class="muted" id="fueraListaStatus">Lista local</span>
-          </div>
-          <div class="muted" style="margin:0 0 10px 0">
-            Esta lista es local del navegador. Los vehiculos retirados no se muestran en las pestanas de llegadas/no despacho.
-          </div>
-          <div style="overflow:auto;max-height:60vh">
-            <table id="fueraListaTable">
-              <thead>
-                <tr>
-                  <th>Fecha retiro</th>
-                  <th>Punto</th>
-                  <th>Base</th>
-                  <th>Interno</th>
-                  <th>MID</th>
-                  <th>Hora llegada</th>
-                  <th>Observacion</th>
-                  <th>Retirado por</th>
-                  <th>Webhook</th>
-                </tr>
-              </thead>
-              <tbody id="fueraListaBody">
-                <tr><td colspan="9" class="muted" style="text-align:center;padding:12px">Sin vehiculos retirados localmente.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
 
         <!-- Contenido Vehiculos Sonar -->
         <div id="tab-vehiculos-sonar" class="tab-content">
@@ -467,34 +197,214 @@ n" href="icons/icon-192.svg">
             <h3 style="margin:0">Mapa de vehiculos en vivo</h3>
             <button class="btn btn-primary" id="btnRefreshMapaVehiculos">Actualizar</button>
             <button class="btn btn-ghost" id="btnFitMapaVehiculos" title="Centrar mapa sobre los vehiculos">Centrar</button>
+            <input id="mapaBuscarCarro" type="search" list="mapaCarrosLista" placeholder="🔎 Buscar interno o placa…" title="Escribe el interno o la placa y Enter para ubicarlo" style="min-width:190px" />
+            <datalist id="mapaCarrosLista"></datalist>
+            <button class="btn btn-ghost" id="btnMapaBuscarCarro" title="Ubicar el carro en el mapa">Buscar</button>
+            <button class="btn btn-ghost" id="btnMapaFiltro" title="Elegir con casillas qué carros ver en el mapa">☑ Filtrar carros</button>
+            <button class="btn btn-ghost" id="btnFullscreenMapa" title="Ver el mapa en pantalla completa (Esc para salir)">⛶ Pantalla completa</button>
+            <button class="btn btn-ghost" id="btnFloatingMapa" title="Mapa flotante: queda visible mientras navegas por la app">🗖 Flotante</button>
+            <button class="btn btn-primary" id="btnToggleSonarPositions" title="Mostrar u ocultar las posiciones reales de la flota (se muestran solas al abrir el mapa)">Posiciones Sonar: ON</button>
+            <button class="btn btn-primary" id="btnToggleAviones" title="Muestra los aviones que aterrizaron sobre el aeropuerto; se van desvaneciendo con las horas">✈️ Aterrizajes: ON</button>
+            <select id="avionHoraSel" class="btn btn-ghost" title="Ver los aterrizajes de una hora específica del día" style="min-width:150px"><option value="">Aterrizajes: en vivo</option></select>
+            <button class="btn btn-primary" id="btnToggleRealQuery" style="display:none" title="Rastreo real desconectado">🛰️ Rastreo real: OFF</button>
+            <button class="btn btn-ghost" id="btnAdminGeocercas" title="Zona de administrador: crear/editar geocercas (requiere contraseña)">🔒 Admin geocercas</button>
+            <button class="btn btn-ghost hidden" id="btnDefinirGeocerca" title="Crear una geocerca: los carros que pasen por ahi se enturnan">+ Geocerca</button>
+            <button class="btn btn-ghost hidden" id="btnConfigItinerarios" title="Definir que itinerarios suben (hacia aeropuerto) y cuales bajan (desde aeropuerto)">⚙ Itinerarios</button>
             <span class="muted">Vehiculos: <strong id="mapaVehiculosCount">0</strong></span>
-            <span class="muted" id="mapaVehiculosRealtime" style="color:var(--fg-soft)">Realtime: -</span>
+            <span class="muted" id="mapaVehiculosRealtime" style="color:var(--fg-soft)">Auto-refresco: -</span>
+            <span class="muted" id="sonarLocationsStatus" style="color:var(--fg-soft)">Sonar: -</span>
             <span class="muted" id="mapaVehiculosStatus">Sin cargar</span>
           </div>
+          <!-- Check list para filtrar qué carros se ven en el mapa -->
+          <div id="mapaFiltroPanel" class="hidden" style="margin:0 0 10px 0;padding:10px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--bg-elev)">
+            <div class="row" style="gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+              <strong>Filtrar carros en el mapa</strong>
+              <input id="mapaFiltroSearch" type="search" placeholder="Buscar interno/placa…" style="min-width:180px" />
+              <button class="btn btn-ghost" id="btnMapaFiltroTodos" type="button">Todos</button>
+              <button class="btn btn-ghost" id="btnMapaFiltroNinguno" type="button">Ninguno</button>
+              <span class="muted" id="mapaFiltroCount"></span>
+            </div>
+            <div class="muted" style="font-size:12px;margin-bottom:6px">Marca los carros que quieres ver. Si no marcas ninguno, se muestran todos.</div>
+            <div id="mapaFiltroLista" style="max-height:230px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:2px 12px"></div>
+          </div>
+          <!-- Selección múltiple de carros (buscador): chips con estado de despacho -->
+          <div id="mapaSeleccion" class="hidden" style="margin:0 0 10px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+            <span class="muted" id="mapaSeleccionResumen"></span>
+            <span id="mapaSeleccionChips" style="display:flex;flex-wrap:wrap;gap:6px"></span>
+            <button class="btn btn-ghost" id="btnMapaSeleccionLimpiar" type="button">Limpiar</button>
+          </div>
+          <!-- Formulario para crear geocerca por puntos (oculto hasta pulsar "+ Geocerca") -->
+          <div id="geocercaForm" class="row hidden" style="margin:0 0 10px 0;padding:10px;border:1px dashed var(--brand);border-radius:var(--r-md);background:var(--brand-soft);flex-wrap:wrap;gap:8px">
+            <strong style="color:var(--brand-strong)">Nueva geocerca:</strong>
+            <input id="geocercaNombre" type="text" placeholder="Nombre (ej. Bajada Tunel)" style="min-width:160px" />
+            <div class="geocerca-itin-wrap">
+              <div class="geocerca-itin-head">
+                <span class="muted">Itinerarios:</span>
+                <button type="button" id="btnGeocercaItinTodos" class="geocerca-itin-link">Todos</button>
+                <button type="button" id="btnGeocercaItinNinguno" class="geocerca-itin-link">Ninguno</button>
+              </div>
+              <div id="geocercaItinBox" class="geocerca-itin-box"></div>
+            </div>
+            <label class="muted" style="display:inline-flex;align-items:center;gap:4px">Sentido
+              <select id="geocercaDireccion" aria-label="Sentido de la geocerca">
+                <option value="bajando">↓ Bajando (desde aeropuerto)</option>
+                <option value="subiendo">↑ Subiendo (hacia aeropuerto)</option>
+              </select>
+            </label>
+            <span class="muted">Puntos: <strong id="geocercaPuntos">0</strong></span>
+            <button class="btn btn-ghost" id="btnUndoGeocerca" type="button">Deshacer punto</button>
+            <button class="btn btn-primary" id="btnFinishGeocerca" type="button">Terminar y guardar</button>
+            <button class="btn btn-ghost" id="btnCancelGeocerca" type="button">Cancelar</button>
+            <span class="muted" id="geocercaHint" style="flex-basis:100%"><b>2 puntos = línea de cruce</b> (recomendada, atraviesa la vía · robusta ante huecos de señal). <b>3+ puntos = zona</b>. Luego "Terminar y guardar".</span>
+          </div>
+          <!-- Lista de geocercas activas con boton para eliminar -->
+          <div id="geocercasList" class="hidden"></div>
+          <!-- Alerta: GPS que dejaron de reportar -->
+          <div id="sonarGpsAlert" class="hidden"></div>
+          <!-- Panel para configurar la direccion (sube/baja) de cada itinerario -->
+          <div id="itinerariosConfig" class="hidden" style="margin:0 0 10px 0;padding:12px;border:1px dashed var(--brand);border-radius:var(--r-md);background:var(--brand-soft)">
+            <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+              <strong style="color:var(--brand-strong)">Direccion de itinerarios (sube / baja)</strong>
+              <span class="muted" id="itinerariosConfigStatus">-</span>
+              <button class="btn btn-ghost" id="btnCloseConfigItin" type="button">Cerrar</button>
+            </div>
+            <div class="muted" style="margin-bottom:8px">
+              Define para cada itinerario si <b>sube</b> (hacia el aeropuerto ↑) o <b>baja</b> (desde el aeropuerto ↓).
+              Las geocercas usan esto para enturnar solo los carros del sentido correcto. Se guarda al instante.
+            </div>
+            <div id="itinerariosConfigGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px"></div>
+          </div>
           <div class="muted" style="margin:0 0 10px 0">
-            Posicion en vivo de la tabla llegadas_104. Click en un marker para ver detalles.
-            Verde = listo · Azul = en espera.
+            Posicion real de la flota (Sonar), actualizada cada 30s. Click en un marker para ver detalles.
+            <b>Color</b>: naranja = sube (hacia aeropuerto) · verde azulado = baja (desde aeropuerto) · morado = sin despacho activo.
+            <b>Flecha ▲</b>: apunta hacia donde va el carro realmente (rumbo del GPS); <b>●</b> = detenido.
+            Las <strong>geocercas</strong> se ven como una línea (2 puntos) o una zona (3+ puntos); los carros que crucen se enturnan.
           </div>
           <div id="mapaVehiculosContainer"
                style="height:calc(100dvh - 280px); min-height:480px; border-radius:var(--r-md); overflow:hidden; border:1px solid var(--line); background:var(--bg-muted)">
           </div>
         </div>
 
-        <!-- Contenido Tabla Llegadas (llegadas_104) -->
-        <div id="tab-tabla-llegadas" class="tab-content">
+        <!-- Contenido Enturnamiento (geocerca) -->
+        <div id="tab-enturnamiento" class="tab-content">
           <div class="row mobile-filters" style="margin-bottom:10px">
-            <h3 style="margin:0">Tabla llegadas (llegadas_104)</h3>
-            <button class="btn btn-primary" id="btnRefreshTablaLlegadas">Actualizar</button>
-            <input id="tablaLlegadasSearch" type="text" placeholder="Buscar interno, mid, itinerario, base..." />
-            <span class="muted">Registros: <strong id="tablaLlegadasCount">0</strong></span>
-            <span class="muted" id="tablaLlegadasRealtime" style="color:var(--fg-soft)">Realtime: -</span>
-            <span class="muted" id="tablaLlegadasStatus">Sin cargar</span>
+            <h3 style="margin:0">Llegadas Aeropuerto</h3>
+            <button class="btn btn-primary" id="btnRefreshEnturnamiento">Actualizar</button>
+            <button class="btn btn-ghost" id="btnEnturnoManual" title="Agregar un carro a mano (ej. paso con el GPS mudo)">+ Agregar manual</button>
+            <span class="muted">En espera: <strong id="enturnamientoCount">0</strong></span>
+            <span class="muted" id="enturnamientoStatus">Sin cargar</span>
+          </div>
+          <!-- El formulario de "Agregar manual" ahora es un modal (ver #enturnoManualModal) -->
+          <datalist id="enturnoManualInternos"></datalist>
+          <div class="guia-pasos" aria-label="Cómo funciona esta lista">
+            <div class="guia-paso"><span class="guia-num">1</span><span class="guia-txt"><b>Llega</b><br>El carro aparece solo al cruzar la geocerca.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">2</span><span class="guia-txt">El <b>#1 (PRÓXIMO)</b> es el que sigue por orden de llegada.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">3</span><span class="guia-txt">Pulsa <b>Despachar</b>. Si no es el #1, pide el motivo.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">4</span><span class="guia-txt">Pasa solo a <b>Despachos Realizados</b> y sale de la lista.</span></div>
           </div>
           <div class="muted" style="margin:0 0 10px 0">
-            Tabla en vivo de la tabla llegadas_104, agrupada por itinerario y ordenada por posicion. Se actualiza automaticamente cuando hay cambios en Supabase.
+            <b>Todo lo que SUBE</b> (va hacia el aeropuerto), en orden de llegada. Se llena solo 24/7.
+            <b style="color:#2563eb">MANUAL</b> = agregado a mano (ej. pasó con el GPS mudo). ·
+            ¿Un carro pasó y no salió? Usa <b>+ Agregar manual</b>.
           </div>
-          <div id="tablaLlegadasGrid" class="itinerario-grid">
-            <div class="muted" style="grid-column:1/-1;text-align:center;padding:18px">Sin datos.</div>
+          <div id="enturnamientoGrid" class="itinerario-grid">
+            <div class="muted" style="grid-column:1/-1;text-align:center;padding:18px">Sin enturnamientos por ahora.</div>
+          </div>
+        </div>
+
+        <!-- Contenido Salidas Aeropuerto (geocerca bajando) -->
+        <div id="tab-salidas-aeropuerto" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Salidas Aeropuerto</h3>
+            <button class="btn btn-primary" id="btnRefreshSalidas">Actualizar</button>
+            <span class="muted">En espera: <strong id="salidasCount">0</strong></span>
+            <span class="muted" id="salidasStatus">Sin cargar</span>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Carros que salieron del aeropuerto (bajando), en orden de paso. Se llena solo 24/7.
+            <b style="color:#dc2626">SIN DESPACHO</b> = detectado por rumbo. ·
+            <b style="color:#2563eb">MANUAL</b> = agregado a mano.
+          </div>
+          <div id="salidasGrid">
+            <div class="muted" style="text-align:center;padding:18px">Sin salidas por ahora.</div>
+          </div>
+        </div>
+
+        <!-- Contenido Llegadas Almacentro (geocerca bajando: 4507 + 3385) -->
+        <div id="tab-llegadas-almacentro-geo" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Llegadas Almacentro</h3>
+            <button class="btn btn-primary" id="btnRefreshAlmacentroGeo">Actualizar</button>
+            <button class="btn btn-ghost" id="btnEnturnoManualAlmacentro" title="Agregar un carro a mano (ej. paso con el GPS mudo)">+ Agregar manual</button>
+            <span class="muted">En espera: <strong id="almacentroGeoCount">0</strong></span>
+            <span class="muted" id="almacentroGeoStatus">Sin cargar</span>
+          </div>
+          <div class="guia-pasos" aria-label="Cómo funciona esta lista">
+            <div class="guia-paso"><span class="guia-num">1</span><span class="guia-txt"><b>Llega</b><br>Aparece solo al cruzar la geocerca hacia Almacentro.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">2</span><span class="guia-txt">El <b>#1 (PRÓXIMO)</b> es el que sigue por orden de llegada.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">3</span><span class="guia-txt">Pulsa <b>Despachar</b>. Si no es el #1, pide el motivo.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">4</span><span class="guia-txt">Pasa solo a <b>Despachos Realizados</b> y sale de la lista.</span></div>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            <b>Todo lo que BAJA</b> (sale del aeropuerto hacia la ciudad), en orden de paso. Se llena solo 24/7.
+          </div>
+          <div id="almacentroGeoGrid">
+            <div class="muted" style="text-align:center;padding:18px">Sin llegadas por ahora.</div>
+          </div>
+        </div>
+
+        <!-- Contenido Llegadas Exposiciones (geocerca bajando: 4503 + 4413) -->
+        <div id="tab-llegadas-exposiciones-geo" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Llegadas Exposiciones</h3>
+            <button class="btn btn-primary" id="btnRefreshExposicionesGeo">Actualizar</button>
+            <button class="btn btn-ghost" id="btnEnturnoManualExpo" title="Agregar un carro a mano (ej. paso con el GPS mudo)">+ Agregar manual</button>
+            <span class="muted">En espera: <strong id="exposicionesGeoCount">0</strong></span>
+            <span class="muted" id="exposicionesGeoStatus">Sin cargar</span>
+          </div>
+          <div class="guia-pasos" aria-label="Cómo funciona esta lista">
+            <div class="guia-paso"><span class="guia-num">1</span><span class="guia-txt"><b>Llega</b><br>Aparece solo al cruzar la geocerca hacia Exposiciones.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">2</span><span class="guia-txt">El <b>#1 (PRÓXIMO)</b> es el que sigue por orden de llegada.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">3</span><span class="guia-txt">Pulsa <b>Despachar</b>. Si no es el #1, pide el motivo.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">4</span><span class="guia-txt">Pasa solo a <b>Despachos Realizados</b> y sale de la lista.</span></div>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Carros que salieron del aeropuerto hacia Exposiciones (itinerarios Exposiciones-Nutibara y Exposiciones), en orden de paso. Se llena solo 24/7.
+          </div>
+          <div id="exposicionesGeoGrid">
+            <div class="muted" style="text-align:center;padding:18px">Sin llegadas por ahora.</div>
+          </div>
+        </div>
+
+        <!-- Auditoría de ingresos manuales al enturnamiento -->
+        <div id="tab-auditoria-manual" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Auditoría · Ingresos manuales</h3>
+            <button class="btn btn-primary" id="audManRefresh">Actualizar</button>
+            <input id="audManFecha" type="date" title="Filtrar por día de registro" />
+            <button class="btn btn-ghost" id="audManHoy">Hoy</button>
+            <input id="audManSearch" type="search" placeholder="Buscar interno / usuario / justificación…" style="min-width:220px" />
+            <button class="btn btn-success" id="audManDownload" title="Descargar (Excel)">Descargar</button>
+            <span class="muted">Registros: <strong id="audManCount">0</strong></span>
+            <span class="muted" id="audManStatus">Sin cargar</span>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Registro de cada carro que se agregó <b>a mano</b> al enturnamiento (<b>+ Agregar manual</b>). Deja constancia de <b>quién</b> lo ingresó, <b>cuándo de verdad</b> (hora del servidor, no manipulable), la <b>hora de paso</b> que escribió y la <b>justificación</b>. Control anti-fraude.
+          </div>
+          <div style="overflow:auto;max-height:66vh">
+            <table class="ent-tabla">
+              <thead><tr><th>REGISTRADO (real)</th><th>USUARIO</th><th>INTERNO</th><th>PLACA</th><th>ITINERARIO</th><th>HORA DE PASO</th><th>POS.</th><th>MOTIVO</th><th>JUSTIFICACIÓN</th></tr></thead>
+              <tbody id="audManBody"><tr><td colspan="9" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
+            </table>
           </div>
         </div>
 
@@ -544,6 +454,118 @@ n" href="icons/icon-192.svg">
           </div>
         </div>
 
+        <!-- Contenido Despachos Aeropuerto (medio aeropuerto: itinerarios 3385 y 4504) -->
+        <div id="tab-despachos-aeropuerto" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Despachos realizados · Medio Aeropuerto</h3>
+            <button class="btn btn-primary" id="btnRefreshDespachosAeropuerto">Actualizar</button>
+            <input id="despachosAeropuertoSearch" type="text" placeholder="Buscar interno, placa, conductor o reg_id..." />
+            <select id="despachosAeropuertoEstadoFilter" aria-label="Filtrar por estado">
+              <option value="">Todos</option>
+              <option value="ACTIVO" selected>Activos</option>
+              <option value="CANCELADO">Cancelados</option>
+            </select>
+            <select id="despachosAeropuertoRangeFilter" aria-label="Rango de tiempo">
+              <option value="24h" selected>Ultimas 24h</option>
+              <option value="7d">Ultimos 7 dias</option>
+              <option value="30d">Ultimos 30 dias</option>
+              <option value="all">Todo</option>
+            </select>
+            <span class="muted">Registros: <strong id="despachosAeropuertoCount">0</strong></span>
+            <span class="muted" id="despachosAeropuertoStatus">Sin cargar</span>
+          </div>
+          <div class="chip-group" id="despachosAeropuertoItinChips" role="tablist" aria-label="Filtrar por itinerario"></div>
+          <div style="overflow:auto;max-height:62vh">
+            <table id="despachosAeropuertoTable">
+              <thead>
+                <tr>
+                  <th>Creado</th>
+                  <th>Reg ID</th>
+                  <th>Interno</th>
+                  <th>Placa</th>
+                  <th>Driver ID</th>
+                  <th>Itinerario</th>
+                  <th>Pasajeros</th>
+                  <th>Observaciones</th>
+                  <th>Estado</th>
+                  <th>Cancelado</th>
+                </tr>
+              </thead>
+              <tbody id="despachosAeropuertoBody">
+                <tr><td colspan="10" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Planilla de Despachos: Almacentro -->
+        <div id="tab-planilla-despachos" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Planilla de despachos Almacentro</h3>
+            <button class="btn btn-primary" id="pd_almacentro_refresh">Actualizar</button>
+            <label class="muted" for="pd_almacentro_fecha">Fecha</label>
+            <input id="pd_almacentro_fecha" type="date" />
+            <button class="btn btn-success" id="pd_almacentro_download">Descargar CSV</button>
+            <span class="muted">Despachos: <strong id="pd_almacentro_count">0</strong></span>
+            <span class="muted" id="pd_almacentro_status">Sin cargar</span>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Subidas de <b>Almacentro</b> hacia el aeropuerto, más reciente arriba. Se llena y actualiza sola. Editable: Ficho, Pasajeros, Más y Conductor.
+          </div>
+          <div style="overflow:auto;max-height:62vh">
+            <table class="ent-tabla">
+              <thead><tr><th>FICHO</th><th>VEHICULO</th><th>SALIDA</th><th>CONTROL</th><th>RUTA</th><th>PASAJEROS</th><th>MAS</th><th>CONDUCTOR</th></tr></thead>
+              <tbody id="pd_almacentro_body"><tr><td colspan="8" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Planilla de Despachos: Centro Comercial San Diego -->
+        <div id="tab-planilla-despachos-sandiego" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Planilla de despachos Centro Comercial San Diego</h3>
+            <button class="btn btn-primary" id="pd_sandiego_refresh">Actualizar</button>
+            <label class="muted" for="pd_sandiego_fecha">Fecha</label>
+            <input id="pd_sandiego_fecha" type="date" />
+            <button class="btn btn-success" id="pd_sandiego_download">Descargar CSV</button>
+            <span class="muted">Despachos: <strong id="pd_sandiego_count">0</strong></span>
+            <span class="muted" id="pd_sandiego_status">Sin cargar</span>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Subidas de <b>Centro Comercial San Diego</b> hacia el aeropuerto, más reciente arriba. Se llena y actualiza sola. Editable: Ficho, Pasajeros, Más y Conductor.
+          </div>
+          <div style="overflow:auto;max-height:62vh">
+            <table class="ent-tabla">
+              <thead><tr><th>FICHO</th><th>VEHICULO</th><th>SALIDA</th><th>CONTROL</th><th>RUTA</th><th>PASAJEROS</th><th>MAS</th><th>CONDUCTOR</th></tr></thead>
+              <tbody id="pd_sandiego_body"><tr><td colspan="8" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Planilla de Despachos: Exposiciones -->
+        <div id="tab-planilla-despachos-expo" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Planilla de despachos Exposiciones</h3>
+            <button class="btn btn-primary" id="pd_expo_refresh">Actualizar</button>
+            <label class="muted" for="pd_expo_fecha">Fecha</label>
+            <input id="pd_expo_fecha" type="date" />
+            <button class="btn btn-success" id="pd_expo_download">Descargar CSV</button>
+            <span class="muted">Despachos: <strong id="pd_expo_count">0</strong></span>
+            <span class="muted" id="pd_expo_status">Sin cargar</span>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Subidas de <b>Exposiciones / Nutibara</b> hacia el aeropuerto, más reciente arriba. Se llena y actualiza sola. Editable: Ficho, Pasajeros, Más y Conductor.
+          </div>
+          <div style="overflow:auto;max-height:62vh">
+            <table class="ent-tabla">
+              <thead><tr><th>FICHO</th><th>VEHICULO</th><th>SALIDA</th><th>CONTROL</th><th>RUTA</th><th>PASAJEROS</th><th>MAS</th><th>CONDUCTOR</th></tr></thead>
+              <tbody id="pd_expo_body"><tr><td colspan="8" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <datalist id="pdConductores"></datalist>
+
         <!-- Contenido Asistencia Biometrica -->
         <div id="tab-asistencia-biometrica" class="tab-content">
           <div class="embedded-app-shell">
@@ -573,7 +595,7 @@ n" href="icons/icon-192.svg">
         <!-- Contenido Conductores CSV -->
         <div id="tab-conductores-csv" class="tab-content">
           <div class="row" style="margin-bottom:10px">
-            <h3 id="conductoresCsvTitle" style="margin:0">Catalogo conductores (Google CSV)</h3>
+            <h3 id="conductoresCsvTitle" style="margin:0">Catálogo conductores (Sonar)</h3>
             <button class="btn btn-ghost" id="btnRefreshConductoresCsv">Actualizar conductores</button>
             <input id="conductoresCsvSearch" type="text" placeholder="Buscar nombre, cedula o dr_id..." />
             <select id="conductoresCsvBaseFilter">
@@ -708,6 +730,174 @@ n" href="icons/icon-192.svg">
           </div>
         </div>
 
+        <!-- Vista Excel: réplica del visor operativo de la programación -->
+        <div id="tab-vista-excel" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Programaciones Vista Excel</h3>
+            <button class="btn btn-primary" id="veRefresh">Actualizar</button>
+            <label class="muted" for="veFecha">Fecha</label>
+            <input id="veFecha" type="date" />
+            <button class="btn btn-ghost" id="veHoy" title="Saltar a hoy">Hoy</button>
+            <button class="btn btn-success" id="veDownload">Descargar Excel</button>
+            <span class="muted">Filas: <strong id="veCount">0</strong></span>
+            <span class="muted" id="veStatus">Sin cargar</span>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Programación operativa idéntica al visor: secciones por puesto, turnos de cada carro y <b>fichos</b> resaltados. Se toma la última programación cargada de la fecha.
+          </div>
+          <div id="veContainer" style="overflow:auto;max-height:70vh;background:#fff">
+            <div class="muted" style="padding:12px;text-align:center">Selecciona una fecha y pulsa Actualizar.</div>
+          </div>
+        </div>
+
+        <!-- Cumplimiento: programación vs despachos reales -->
+        <div id="tab-cumplimiento" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Cumplimiento</h3>
+            <button class="btn btn-primary" id="cumpRefresh">Actualizar</button>
+            <label class="muted" for="cumpFecha">Fecha</label>
+            <input id="cumpFecha" type="date" />
+            <button class="btn btn-ghost" id="cumpHoy" title="Saltar a hoy">Hoy</button>
+            <label class="muted" style="display:inline-flex;align-items:center;gap:6px">
+              <input type="checkbox" id="cumpSoloProblemas" /> Solo incumplimientos
+            </label>
+            <span class="muted" id="cumpStatus">Sin cargar</span>
+          </div>
+          <div class="muted" id="cumpSummary" style="margin:0 0 10px 0"></div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Cada carro tiene <b>2 turnos de conductor</b>: Turno 1 (INICIA → cambio) y Turno 2 (cambio → HORA FIN). Se revisa que <b>cada turno</b> haya tenido despachos. <b>Laborando/OK</b> = cubierto. <b>Pendiente</b> = el turno aún no empieza. <b>Sin despachar</b> = ya empezó y no tiene despachos (turno sin cubrir).
+          </div>
+          <div style="overflow:auto;max-height:64vh">
+            <table class="ent-tabla">
+              <thead><tr><th>INTERNO</th><th>TURNO 1</th><th>TURNO 2</th><th>DESPACHOS</th></tr></thead>
+              <tbody id="cumpBody"><tr><td colspan="4" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Vuelos MDE (llegadas / salidas del aeropuerto) -->
+        <!-- Alertas GPS (historial de desconexiones guardado 24/7) -->
+        <div id="tab-alertas-gps" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Alertas GPS · Desconexiones</h3>
+            <button class="btn btn-primary" id="gpsDescRefresh">Actualizar</button>
+            <span style="display:inline-flex;gap:4px">
+              <button class="btn btn-ghost" id="gpsDescFiltroActivas">Sin reportar ahora</button>
+              <button class="btn btn-primary" id="gpsDescFiltroTodas">Todas</button>
+            </span>
+            <input id="gpsDescFecha" type="date" title="Filtrar por día (vacío = últimos días)" />
+            <button class="btn btn-ghost" id="gpsDescHoy">Hoy</button>
+            <input id="gpsDescSearch" type="search" placeholder="Buscar interno / placa…" style="min-width:180px" />
+            <button class="btn btn-success" id="gpsDescDownload" title="Descargar la lista (Excel)">Descargar</button>
+            <span class="muted">Registros: <strong id="gpsDescCount">0</strong></span>
+            <span class="muted" id="gpsDescStatus">Sin cargar</span>
+          </div>
+          <div id="gpsDescRecordatorio" style="display:none;margin:0 0 10px 0;padding:10px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#7f1d1d;font-weight:600"></div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Historial de vehículos que dejaron de reportar GPS <b>≥20 min</b>. Se guarda solo, <b>24/7</b>, aunque nadie tenga el panel abierto. Muestra a qué hora se calló, cuándo volvió y <b>cuánto tiempo</b> estuvo sin reportar. Fila en rojo = <b>GPS aún caído</b>. Agrega una <b>observación</b> y marca el <b>estado</b> (Pendiente / Resuelto). La columna <b>FALLOS</b> marca los vehículos <b>reincidentes</b>.
+          </div>
+          <div style="overflow:auto;max-height:66vh">
+            <table class="ent-tabla">
+              <thead><tr><th>INTERNO</th><th>PLACA</th><th title="Cuántas veces ha fallado este vehículo (en los registros cargados)">FALLOS</th><th>SE CALLÓ (último GPS)</th><th>VOLVIÓ</th><th>DURACIÓN</th><th>GPS</th><th>OBSERVACIÓN</th><th>ESTADO</th></tr></thead>
+              <tbody id="gpsDescBody"><tr><td colspan="9" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="tab-vuelos" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Vuelos MDE (Rionegro)</h3>
+            <button class="btn btn-primary" id="vuelosRefresh">Actualizar</button>
+            <span style="display:inline-flex;gap:4px">
+              <button class="btn btn-primary" id="vuelosTabLleg">Llegadas</button>
+              <button class="btn btn-ghost" id="vuelosTabSal">Salidas</button>
+            </span>
+            <span style="display:inline-flex;gap:4px">
+              <button class="btn btn-primary" id="vuelosDiaHoy">Hoy</button>
+              <button class="btn btn-ghost" id="vuelosDiaManana">Mañana</button>
+            </span>
+            <input id="vuelosSearch" type="search" placeholder="Buscar vuelo/aerolínea/ciudad…" style="min-width:200px" />
+            <button class="btn btn-success" id="vuelosDownload" title="Descargar la lista que se está viendo (Excel)">Descargar</button>
+            <span class="muted">Vuelos: <strong id="vuelosCount">0</strong></span>
+            <span class="muted" id="vuelosStatus">Sin cargar</span>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Llegadas y salidas del Aeropuerto José María Córdova (dato oficial de Airplan), en hora Colombia. Se actualiza solo. <b>Asientos</b> es una estimación por aerolínea.
+          </div>
+          <div style="overflow:auto;max-height:66vh">
+            <table class="ent-tabla">
+              <thead><tr><th>HORA</th><th>VUELO</th><th>AEROLÍNEA</th><th id="vuelosCiudadTh">ORIGEN</th><th id="vuelosPuertaTh">PUERTA</th><th>ASIENTOS</th><th>ESTADO</th></tr></thead>
+              <tbody id="vuelosBody"><tr><td colspan="7" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Asistencias (marcaciones de personal) -->
+        <div id="tab-asistencias" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Asistencias</h3>
+            <button class="btn btn-primary" id="asisRefresh">Actualizar</button>
+            <input id="asisFecha" type="date" />
+            <button class="btn btn-ghost" id="asisHoy">Hoy</button>
+            <span style="display:inline-flex;gap:4px">
+              <button class="btn btn-ghost" id="asisFiltroTodos">Todas</button>
+              <button class="btn btn-ghost" id="asisFiltroEntrada">Entradas</button>
+              <button class="btn btn-ghost" id="asisFiltroSalida">Salidas</button>
+              <button class="btn btn-primary" id="asisFiltroSinSalida">Sin salida</button>
+            </span>
+            <label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer">
+              <input id="asisSoloVehiculo" type="checkbox" /> Solo con vehículo
+            </label>
+            <button class="btn btn-ghost" id="asisDemo" title="Muestra un ejemplo de la alerta de jornada máxima">Ver ejemplo de alerta</button>
+            <input id="asisSearch" type="search" placeholder="Buscar nombre / cédula / vehículo…" style="min-width:220px" />
+            <span class="muted">Registros: <strong id="asisCount">0</strong></span>
+            <span class="muted" id="asisStatus">Sin cargar</span>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Marcaciones de entrada/salida del personal (hora Colombia). La columna <b>TRABAJANDO</b> cuenta desde la entrada hasta ahora. Alerta a las <b>14h30m</b> (máximo permitido por Combuses).
+          </div>
+          <div id="asisAlerta"></div>
+          <div style="overflow:auto;max-height:66vh">
+            <table class="ent-tabla">
+              <thead><tr><th>HORA</th><th>SENTIDO</th><th>COLABORADOR</th><th>CÉDULA</th><th>OBRA/BASE</th><th>VEHÍCULO</th><th>TRABAJANDO</th></tr></thead>
+              <tbody id="asisBody"><tr><td colspan="7" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Informe de gestión de flota: llegadas vs despachos por hora -->
+        <div id="tab-informe-flota" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Informe de gestión de flota</h3>
+            <button class="btn btn-primary" id="iflRefresh">Actualizar</button>
+            <input id="iflFecha" type="date" />
+            <button class="btn btn-ghost" id="iflHoy">Hoy</button>
+            <button class="btn btn-ghost" id="iflDownload">Descargar Excel</button>
+            <span class="muted" id="iflStatus">Sin cargar</span>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Cruce por hora entre <b>llegadas del aeropuerto</b> (Airplan) y <b>despachos de subida</b> (buses enviados al aeropuerto). Demanda estimada = asientos × <b>82%</b> ocupación × <b>15%</b> captación; buses necesarios = ⌈pax / 19⌉. <b>Cobertura</b> = despachos ÷ buses necesarios. No cuentan las cancelaciones reales (canceladas en &lt;30 min); el CANCELADO por cierre de día sí cuenta.
+          </div>
+          <div id="iflResumen" class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:12px"></div>
+          <div style="overflow:auto;max-height:60vh">
+            <table class="ent-tabla" id="iflTabla">
+              <thead><tr>
+                <th>HORA</th><th>VUELOS LLEG.</th><th>ASIENTOS</th><th>PAX ESTIM.</th>
+                <th>BUSES NEC.</th><th>DESPACHOS SUBIDA</th><th>PAX TRANSP.</th><th>COBERTURA</th>
+              </tr></thead>
+              <tbody id="iflBody"><tr><td colspan="8" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
+            </table>
+          </div>
+          <h4 style="margin:16px 0 6px 0">Despachos por punto de despacho</h4>
+          <div class="muted" style="margin:0 0 8px 0">Distribución de <b>todos</b> los despachos del día (no solo aeropuerto) según el punto/itinerario de salida.</div>
+          <div style="overflow:auto;max-height:40vh">
+            <table class="ent-tabla" id="iflPuntoTabla">
+              <thead><tr><th>PUNTO DE DESPACHO</th><th>DESPACHOS</th><th>PAX TRANSP.</th><th>% DEL TOTAL</th></tr></thead>
+              <tbody id="iflPuntoBody"><tr><td colspan="4" class="muted" style="text-align:center;padding:12px">Sin datos.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -734,6 +924,22 @@ n" href="icons/icon-192.svg">
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btnSwapCancel">Cancelar</button>
       <button class="btn btn-primary" id="btnSwapConfirm">Confirmar cambio</button>
+    </div>
+  </div>
+</div>
+<div id="gpsHistModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="gpsHistTitle">
+  <div class="modal-card" style="max-width:820px;width:96%">
+    <h3 id="gpsHistTitle" class="modal-title">Historial de desconexiones</h3>
+    <div class="modal-sub" id="gpsHistSub">Todos los incidentes de este vehículo, con fecha y hora.</div>
+    <div style="overflow:auto;max-height:60vh;margin-top:8px">
+      <table class="ent-tabla">
+        <thead><tr><th>#</th><th>SE CALLÓ (último GPS)</th><th>VOLVIÓ</th><th>DURACIÓN</th><th>GPS</th><th>OBSERVACIÓN</th><th>ESTADO</th></tr></thead>
+        <tbody id="gpsHistBody"><tr><td colspan="7" class="muted" style="text-align:center;padding:12px">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="modal-actions" style="margin-top:12px">
+      <button class="btn btn-ghost" id="gpsHistCerrar">Cerrar</button>
+      <button class="btn btn-success" id="gpsHistDownload">Descargar historial</button>
     </div>
   </div>
 </div>
@@ -772,6 +978,10 @@ n" href="icons/icon-192.svg">
         <select id="dispatchModalItinerarySelect" style="width:100%;margin-top:6px">
           <option value="">Selecciona itinerario...</option>
         </select>
+      </div>
+      <div style="grid-column:1 / -1">
+        <strong>Ficho / Tipo:</strong>
+        <input id="dispatchModalFichoSelect" list="fichoOpciones" type="text" placeholder="Normal (vacío), o escribe: Ficho Terminal, Apoyo…" style="width:100%;margin-top:6px" />
       </div>
       <div style="grid-column:1 / -1"><strong>Observaciones:</strong> <span id="dispatchModalObs">-</span></div>
     </div>
@@ -881,9 +1091,114 @@ n" href="icons/icon-192.svg">
   </div>
 </div>
 
-<script src="js/functions.js"></script>
-<script src="js/main.js"></script>
-<script src="js/pwa.js"></script>
+<!-- Modal: Agregar carro a la lista (enturnar manual) -->
+<div id="enturnoManualModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="enturnoManualTitle">
+  <div class="modal-card">
+    <h3 id="enturnoManualTitle" class="modal-title">Agregar carro a la lista</h3>
+    <div class="modal-sub">Úsalo cuando un carro pasó y no quedó registrado (ej. GPS mudo) o para enturnar a mano. Solo lo pone en la fila; despachar es aparte.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <div>
+        <strong>Interno *</strong>
+        <input id="enturnoManualInterno" list="enturnoManualInternos" type="text" placeholder="ej. 717" style="width:100%;margin-top:6px" />
+        <div class="muted ent-modal-hint" id="enturnoManualVeh">Escribe el interno…</div>
+      </div>
+      <div>
+        <strong>Conductor</strong>
+        <select id="enturnoManualConductorSelect" style="width:100%;margin-top:6px"></select>
+        <input id="enturnoManualConductorOtro" list="enturnoManualSonarConductores" type="text" placeholder="Busca un conductor de Sonar…" style="width:100%;margin-top:6px;display:none" />
+        <datalist id="enturnoManualSonarConductores"></datalist>
+        <div class="muted ent-modal-hint" id="enturnoManualConductor" style="margin-top:6px">—</div>
+      </div>
+      <div style="grid-column:1 / -1">
+        <strong>Itinerario *</strong>
+        <select id="enturnoManualItin" style="width:100%;margin-top:6px"></select>
+        <div class="ent-modal-preview" style="margin-top:8px">
+          <span id="enturnoManualSentido" class="turno-tag" style="display:none"></span>
+          <span class="muted ent-modal-hint" id="enturnoManualLista">—</span>
+        </div>
+      </div>
+      <div>
+        <strong>Hora de paso</strong>
+        <input id="enturnoManualHora" type="time" style="width:100%;margin-top:6px" />
+        <div class="muted ent-modal-hint">Solo la <b>hora</b> (Colombia). La fecha queda fija en <b id="enturnoManualFechaHoy">hoy</b> y <b>no se puede cambiar</b>.</div>
+      </div>
+      <div>
+        <strong>Posición (prelación)</strong>
+        <input id="enturnoManualPos" type="number" min="1" step="1" placeholder="—" style="width:100%;margin-top:6px" />
+        <div class="muted ent-modal-hint">Vacío = entra por hora. Con número = lo coloca en esa posición de la cola.</div>
+      </div>
+      <div style="grid-column:1 / -1">
+        <strong>Motivo</strong>
+        <select id="enturnoManualMotivo" style="width:100%;margin-top:6px">
+          <option value="">— (opcional)</option>
+          <option value="GPS mudo">GPS mudo (no reportó al cruzar)</option>
+          <option value="Viene de taller">Viene de taller</option>
+          <option value="Prelación">Prelación</option>
+          <option value="Ajuste operativo">Ajuste operativo</option>
+          <option value="Otro">Otro</option>
+        </select>
+      </div>
+      <div style="grid-column:1 / -1">
+        <strong>Justificación * <span class="muted" style="font-weight:400">(por qué se ingresa a mano — queda auditado)</span></strong>
+        <textarea id="enturnoManualJustificacion" maxlength="500" placeholder="Ej: El carro pasó a la 1:40 p. m. pero el GPS estaba mudo; verificado con el conductor." style="width:100%;margin-top:6px;min-height:58px"></textarea>
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-top:14px">
+      <span class="muted" id="enturnoManualStatus" style="flex:1;text-align:left"></span>
+      <button class="btn btn-ghost" id="btnEnturnoManualCancel" type="button">Cancelar</button>
+      <button class="btn btn-primary" id="btnEnturnoManualSave" type="button">Agregar a la lista</button>
+    </div>
+  </div>
+</div>
+
+<!-- Sugerencias de Ficho (usado por el modal de despacho y la planilla) -->
+<datalist id="fichoOpciones">
+  <option value="Ficho Terminal"></option>
+  <option value="Ficho San Diego"></option>
+  <option value="Apoyo Terminal"></option>
+  <option value="Apoyo San Diego"></option>
+  <option value="De Expo"></option>
+  <option value="D"></option>
+  <option value="Otro"></option>
+</datalist>
+
+<!-- Ventana de mapa flotante (picture-in-picture) -->
+<div id="mapaFloating" class="mapa-floating hidden">
+  <div class="mapa-floating-header" id="mapaFloatingHeader">
+    <span>🗺️ Mapa flotante</span>
+    <span class="mapa-floating-actions">
+      <button type="button" id="btnFloatingFit" title="Centrar">Centrar</button>
+      <button type="button" id="btnFloatingClose" title="Anclar de vuelta a la pestaña">✕</button>
+    </span>
+  </div>
+  <div id="mapaFloatingBody"></div>
+</div>
+
+<script src="js/functions.js?v=1.10.151"></script>
+<script src="js/main.js?v=1.10.151"></script>
+<script src="js/pwa.js?v=1.10.151"></script>
+<script>
+  // Interruptor de tema claro/oscuro (persistente en localStorage).
+  (function(){
+    var btn = document.getElementById('btnThemeToggle');
+    if(!btn) return;
+    var meta = document.querySelector('meta[name="theme-color"]');
+    function sync(){
+      var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      btn.textContent = dark ? '☀️' : '🌙';
+      btn.title = dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro';
+      if (meta) meta.setAttribute('content', dark ? '#0b1220' : '#0078d4');
+    }
+    sync();
+    btn.addEventListener('click', function(){
+      var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      var next = dark ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try{ localStorage.setItem('ui-theme', next); }catch(e){}
+      sync();
+    });
+  })();
+</script>
 </body>
 </html>
 

@@ -109,6 +109,7 @@ n" href="icons/icon-192.svg">
           <div class="tab" data-tab="enturnamiento">Llegadas Aeropuerto</div>
           <div class="tab" data-tab="llegadas-almacentro-geo">Llegadas Almacentro</div>
           <div class="tab" data-tab="llegadas-exposiciones-geo">Llegadas Exposiciones</div>
+          <div class="tab" data-tab="llegadas-terminalnorte-geo">Llegadas Terminal Norte</div>
           <div class="tab hidden" data-tab="salidas-aeropuerto">Salidas Aeropuerto</div>
           <div class="tab" data-tab="auditoria-manual">Auditoría manual</div>
           <div class="tab" data-tab="historial-despachos">Historial despachos</div>
@@ -382,6 +383,32 @@ n" href="icons/icon-192.svg">
             Carros que salieron del aeropuerto hacia Exposiciones (itinerarios Exposiciones-Nutibara y Exposiciones), en orden de paso. Se llena solo 24/7.
           </div>
           <div id="exposicionesGeoGrid">
+            <div class="muted" style="text-align:center;padding:18px">Sin llegadas por ahora.</div>
+          </div>
+        </div>
+
+        <!-- Contenido Llegadas Terminal Norte (geocerca bajando por la autopista: 4501) -->
+        <div id="tab-llegadas-terminalnorte-geo" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Llegadas Terminal Norte</h3>
+            <button class="btn btn-primary" id="btnRefreshTerminalNorteGeo">Actualizar</button>
+            <button class="btn btn-ghost" id="btnEnturnoManualTN" title="Agregar un carro a mano (ej. paso con el GPS mudo)">+ Agregar manual</button>
+            <span class="muted">En espera: <strong id="terminalNorteGeoCount">0</strong></span>
+            <span class="muted" id="terminalNorteGeoStatus">Sin cargar</span>
+          </div>
+          <div class="guia-pasos" aria-label="Cómo funciona esta lista">
+            <div class="guia-paso"><span class="guia-num">1</span><span class="guia-txt"><b>Llega</b><br>Aparece solo al cruzar la geocerca hacia Terminal Norte.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">2</span><span class="guia-txt">El <b>#1 (PRÓXIMO)</b> es el que sigue por orden de llegada.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">3</span><span class="guia-txt">Pulsa <b>Despachar</b>. Si no es el #1, pide el motivo.</span></div>
+            <span class="guia-flecha">→</span>
+            <div class="guia-paso"><span class="guia-num">4</span><span class="guia-txt">Pasa solo a <b>Despachos Realizados</b> y sale de la lista.</span></div>
+          </div>
+          <div class="muted" style="margin:0 0 10px 0">
+            Carros que salieron del aeropuerto hacia Terminal Norte (por la autopista, itinerario Aeropuerto-autopista-terminalnorte), en orden de paso. Se llena solo 24/7.
+          </div>
+          <div id="terminalNorteGeoGrid">
             <div class="muted" style="text-align:center;padding:18px">Sin llegadas por ahora.</div>
           </div>
         </div>
@@ -1238,9 +1265,9 @@ n" href="icons/icon-192.svg">
   <div id="mapaFloatingBody"></div>
 </div>
 
-<script src="js/functions.js?v=1.10.156"></script>
-<script src="js/main.js?v=1.10.156"></script>
-<script src="js/pwa.js?v=1.10.156"></script>
+<script src="js/functions.js?v=1.10.157"></script>
+<script src="js/main.js?v=1.10.157"></script>
+<script src="js/pwa.js?v=1.10.157"></script>
 <script>
   // Interruptor de tema claro/oscuro (persistente en localStorage).
   (function(){

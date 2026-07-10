@@ -29,6 +29,7 @@ const SONAR_ITINERARIES = [
   { id: "3394", grupo: "NUTIBARA", nombre: "Nutibara-Aeropuerto-Variante Palmas" },
   { id: "3395", grupo: "SANDIEGO", nombre: "San Diego-Aeropuerto-Variante Palmas" },
   { id: "4413", grupo: "AEROPUERTO", nombre: "Aeropuerto-Exposiciones" },
+  { id: "4500", grupo: "TERMINALNORTE", nombre: "Terminalnorte-autopista-aeropuerto" },
   { id: "4501", grupo: "AEROPUERTO", nombre: "Aeropuerto-autopista-terminalnorte" },
   { id: "4502", grupo: "EXPOSICIONES", nombre: "Nutibara-exposiciones-tunel-aeropuerto" },
   { id: "4503", grupo: "AEROPUERTO", nombre: "Aeropuerto-Tunel-Exposiciones-Nutibara" },
@@ -3073,7 +3074,7 @@ async function loadEnturnamientos(){
     renderEnturnamientoTab();
     const stamp = horaCO(new Date());
     if (enturnamientoStatus) enturnamientoStatus.textContent = `Actualizado ${stamp}`;
-    ["salidasStatus", "almacentroGeoStatus", "exposicionesGeoStatus"].forEach(sid => {
+    ["salidasStatus", "almacentroGeoStatus", "exposicionesGeoStatus", "terminalNorteGeoStatus"].forEach(sid => {
       const el = document.getElementById(sid);
       if (el) el.textContent = `Actualizado ${stamp}`;
     });
@@ -3132,6 +3133,7 @@ async function cruzarDespachosAutomaticos(){
 const SALIDAS_DESTINO_TABS = [
   { tab: "llegadas-almacentro-geo", gridId: "almacentroGeoGrid", countId: "almacentroGeoCount", statusId: "almacentroGeoStatus", itin: ["4505", "4504", "3395"] },
   { tab: "llegadas-exposiciones-geo", gridId: "exposicionesGeoGrid", countId: "exposicionesGeoCount", statusId: "exposicionesGeoStatus", itin: ["4502", "3387", "3394"] },
+  { tab: "llegadas-terminalnorte-geo", gridId: "terminalNorteGeoGrid", countId: "terminalNorteGeoCount", statusId: "terminalNorteGeoStatus", itin: ["4500"] },
 ];
 
 // ===== Programación de filas (plan diario por vehículo) =====
@@ -3228,14 +3230,17 @@ function renderEnturnamientoTab(){
   const aeropuerto = rows.filter(r => listaDeFila(r) === "aeropuerto");
   const almacentro = rows.filter(r => listaDeFila(r) === "almacentro");
   const exposiciones = rows.filter(r => listaDeFila(r) === "exposiciones");
+  const terminalnorte = rows.filter(r => listaDeFila(r) === "terminalnorte");
   // Llegadas AEROPUERTO = TODO lo que SUBE (va hacia el aeropuerto = llega al aeropuerto).
   renderListaLlegadas(enturnamientoGrid, enturnamientoCount, aeropuerto, "Sin llegadas por ahora.");
-  // Llegadas ALMACENTRO = lo que BAJA hacia Almacentro/San Diego (sin Exposiciones).
+  // Llegadas ALMACENTRO = lo que BAJA hacia Almacentro/San Diego (sin Exposiciones ni Terminal Norte).
   renderListaLlegadas(document.getElementById("almacentroGeoGrid"), document.getElementById("almacentroGeoCount"), almacentro, "Sin llegadas por ahora.");
   // Llegadas EXPOSICIONES = lo que BAJA hacia Exposiciones/Nutibara (pestaña aparte).
   renderListaLlegadas(document.getElementById("exposicionesGeoGrid"), document.getElementById("exposicionesGeoCount"), exposiciones, "Sin llegadas por ahora.");
-  // "Salidas Aeropuerto" (oculta) sigue de respaldo: todas las bajadas (Almacentro + Exposiciones).
-  renderListaLlegadas(document.getElementById("salidasGrid"), document.getElementById("salidasCount"), almacentro.concat(exposiciones), "Sin salidas por ahora.");
+  // Llegadas TERMINAL NORTE = lo que BAJA por la autopista hacia Terminal Norte (pestaña aparte).
+  renderListaLlegadas(document.getElementById("terminalNorteGeoGrid"), document.getElementById("terminalNorteGeoCount"), terminalnorte, "Sin llegadas por ahora.");
+  // "Salidas Aeropuerto" (oculta) sigue de respaldo: todas las bajadas (Almacentro + Exposiciones + Terminal Norte).
+  renderListaLlegadas(document.getElementById("salidasGrid"), document.getElementById("salidasCount"), almacentro.concat(exposiciones).concat(terminalnorte), "Sin salidas por ahora.");
 }
 
 // Render de una lista (tabla) de enturnamientos en orden de llegada.
@@ -3647,7 +3652,7 @@ function buscarVehiculoPorInterno(interno){
 // Itinerarios que BAJAN (salen del aeropuerto). -> caen en "Llegadas Almacentro".
 const ITINERARIOS_BAJADA_AEROPUERTO = ["3385", "4503", "4507", "4413", "4501"];
 // Itinerarios que SUBEN (van hacia el aeropuerto). -> caen en "Llegadas Aeropuerto".
-const ITINERARIOS_SUBIDA_AEROPUERTO = ["4505", "4504", "3395", "4502", "3387", "3394"];
+const ITINERARIOS_SUBIDA_AEROPUERTO = ["4505", "4504", "3395", "4502", "3387", "3394", "4500"];
 
 // Sentido (sube/baja) de un itinerario, segun lo configurado o el nombre/catalogo.
 function sentidoDeItinerario(itinId){
@@ -3673,25 +3678,36 @@ function sentidoDeFila(row){
 // De lo que BAJA del aeropuerto, estos itinerarios van hacia Exposiciones/Nutibara y
 // tienen su propia pestaña "Llegadas Exposiciones" (no se mezclan con Almacentro).
 const ITINERARIOS_EXPOSICIONES = ["4503", "4413"];
-// Solo bajada hacia Almacentro/San Diego (bajada - Exposiciones - ocultos).
+// Bajada hacia Terminal Norte (por la autopista, no pasa San Diego): pestaña propia.
+const ITINERARIOS_TERMINAL_NORTE = ["4501"];
+// Solo bajada hacia Almacentro/San Diego (bajada - Exposiciones - Terminal Norte - ocultos).
 const ITINERARIOS_ALMACENTRO_LLEGADA = ITINERARIOS_BAJADA_AEROPUERTO
-  .filter(id => !ITINERARIOS_EXPOSICIONES.includes(id) && !ITINERARIOS_OCULTOS.includes(id));
+  .filter(id => !ITINERARIOS_EXPOSICIONES.includes(id)
+    && !ITINERARIOS_TERMINAL_NORTE.includes(id)
+    && !ITINERARIOS_OCULTOS.includes(id));
 const NOMBRE_LISTA = {
   aeropuerto: "Llegadas Aeropuerto",
   almacentro: "Llegadas Almacentro",
   exposiciones: "Llegadas Exposiciones",
+  terminalnorte: "Llegadas Terminal Norte",
 };
 
-// Pestaña a la que pertenece un itinerario: "aeropuerto" (sube), "exposiciones" o "almacentro" (baja).
+// Pestaña a la que pertenece un itinerario: "aeropuerto" (sube), "exposiciones",
+// "terminalnorte" o "almacentro" (baja).
 function listaDeItinerario(itinId){
   const id = String(itinId || "").trim();
   if (sentidoDeItinerario(id) === "sube") return "aeropuerto";
-  return ITINERARIOS_EXPOSICIONES.includes(id) ? "exposiciones" : "almacentro";
+  if (ITINERARIOS_EXPOSICIONES.includes(id)) return "exposiciones";
+  if (ITINERARIOS_TERMINAL_NORTE.includes(id)) return "terminalnorte";
+  return "almacentro";
 }
 // Pestaña de una fila de enturnamiento (usa el sentido guardado + el itinerario).
 function listaDeFila(row){
   if (sentidoDeFila(row) === "sube") return "aeropuerto";
-  return ITINERARIOS_EXPOSICIONES.includes(String(row?.itinerario_id || "").trim()) ? "exposiciones" : "almacentro";
+  const id = String(row?.itinerario_id || "").trim();
+  if (ITINERARIOS_EXPOSICIONES.includes(id)) return "exposiciones";
+  if (ITINERARIOS_TERMINAL_NORTE.includes(id)) return "terminalnorte";
+  return "almacentro";
 }
 
 // Itinerarios que se PUEDEN despachar segun el punto (lista) del carro.
@@ -3922,7 +3938,8 @@ function ensureEnturnamientoPolling(){
     if (!currentUserId) return;
     const tab = getActiveTabId();
     const viendo = tab === "enturnamiento" || tab === "salidas-aeropuerto"
-      || tab === "llegadas-almacentro-geo" || tab === "llegadas-exposiciones-geo";
+      || tab === "llegadas-almacentro-geo" || tab === "llegadas-exposiciones-geo"
+      || tab === "llegadas-terminalnorte-geo";
     if (!viendo) return;
     loadEnturnamientos();
   }, 20000);
@@ -8675,7 +8692,8 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tabId === 'despachos-sonar' && !despachosSonarLastLoadedAt) loadDespachosSonarFromEdge();
     if (tabId === 'mapa-vehiculos') activateMapaVehiculosTab();
     if (tabId === 'enturnamiento' || tabId === 'salidas-aeropuerto'
-        || tabId === 'llegadas-almacentro-geo' || tabId === 'llegadas-exposiciones-geo') {
+        || tabId === 'llegadas-almacentro-geo' || tabId === 'llegadas-exposiciones-geo'
+        || tabId === 'llegadas-terminalnorte-geo') {
       loadEnturnamientos();
       ensureEnturnamientoRealtime();
       ensureEnturnamientoPolling();
@@ -8952,6 +8970,8 @@ function bindUIEvents(){
   if (btnEntManAlm) btnEntManAlm.addEventListener("click", () => toggleEnturnoManual(true, "4507", ITINERARIOS_ALMACENTRO_LLEGADA)); // Almacentro (baja, sin Exposiciones)
   const btnEntManExp = document.getElementById("btnEnturnoManualExpo");
   if (btnEntManExp) btnEntManExp.addEventListener("click", () => toggleEnturnoManual(true, "4503", ITINERARIOS_EXPOSICIONES)); // Exposiciones (baja hacia Exposiciones)
+  const btnEntManTN = document.getElementById("btnEnturnoManualTN");
+  if (btnEntManTN) btnEntManTN.addEventListener("click", () => toggleEnturnoManual(true, "4501", ITINERARIOS_TERMINAL_NORTE)); // Terminal Norte (baja por autopista)
   if (btnEnturnoManualCancel) btnEnturnoManualCancel.addEventListener("click", () => toggleEnturnoManual(false));
   const condSel = document.getElementById("enturnoManualConductorSelect");
   if (condSel) condSel.addEventListener("change", () => {
@@ -8973,8 +8993,8 @@ function bindUIEvents(){
   if (salidasGridEl) salidasGridEl.addEventListener("click", handleEnturnamientoClick);
   const btnRefreshSalidas = document.getElementById("btnRefreshSalidas");
   if (btnRefreshSalidas) btnRefreshSalidas.addEventListener("click", () => loadEnturnamientos());
-  // Pestañas de salida por destino (Almacentro, Exposiciones): Quitar + Actualizar.
-  ["almacentroGeoGrid", "exposicionesGeoGrid"].forEach(gid => {
+  // Pestañas de salida por destino (Almacentro, Exposiciones, Terminal Norte): Quitar + Actualizar.
+  ["almacentroGeoGrid", "exposicionesGeoGrid", "terminalNorteGeoGrid"].forEach(gid => {
     const el = document.getElementById(gid);
     if (el) el.addEventListener("click", handleEnturnamientoClick);
   });
@@ -8982,6 +9002,8 @@ function bindUIEvents(){
   if (btnRefreshAlmacentroGeo) btnRefreshAlmacentroGeo.addEventListener("click", () => loadEnturnamientos());
   const btnRefreshExposicionesGeo = document.getElementById("btnRefreshExposicionesGeo");
   if (btnRefreshExposicionesGeo) btnRefreshExposicionesGeo.addEventListener("click", () => loadEnturnamientos());
+  const btnRefreshTerminalNorteGeo = document.getElementById("btnRefreshTerminalNorteGeo");
+  if (btnRefreshTerminalNorteGeo) btnRefreshTerminalNorteGeo.addEventListener("click", () => loadEnturnamientos());
   // Eliminar geocerca desde el popup del mapa (con confirmacion obligatoria).
   if (mapaVehiculosContainer) {
     mapaVehiculosContainer.addEventListener("click", (ev) => {

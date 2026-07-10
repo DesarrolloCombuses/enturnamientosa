@@ -958,6 +958,19 @@ input:disabled,select:disabled{background:var(--bg-muted);color:var(--fg-soft);c
   font-weight:800;
   letter-spacing:.3px;
 }
+.veh-recuperado{
+  display:inline-flex;align-items:center;padding:1px 8px;border-radius:999px;
+  background:#0891b2;color:#fff;font-size:10px;font-weight:800;letter-spacing:.3px;
+}
+.aud-salud-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:10px;
+}
+.aud-kpi{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:10px 6px;border-radius:10px;background:#fff;border:1px solid #e2e8f0;
+}
+.aud-kpi-n{font-size:26px;font-weight:800;line-height:1}
+.aud-kpi-l{font-size:11px;color:#64748b;font-weight:600;margin-top:3px;text-transform:uppercase;letter-spacing:.3px}
 .ent-prox{
   font-size:9px;
   font-weight:800;

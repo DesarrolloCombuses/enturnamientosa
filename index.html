@@ -106,6 +106,7 @@ n" href="icons/icon-192.svg">
           <div class="tab active" data-tab="mapa-vehiculos">Mapa vehiculos</div>
           <div class="tab" data-tab="alertas-gps">Alertas GPS <span id="gpsDescTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
           <div class="tab" data-tab="alertas-despacho">Alertas despacho <span id="despAnomTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
+          <div class="tab" data-tab="auditoria-llegadas">Auditoría llegadas <span id="audLlegTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
           <div class="tab" data-tab="enturnamiento">Llegadas Aeropuerto</div>
           <div class="tab" data-tab="llegadas-almacentro-geo">Llegadas Almacentro</div>
           <div class="tab" data-tab="llegadas-exposiciones-geo">Llegadas Exposiciones</div>
@@ -856,6 +857,31 @@ n" href="icons/icon-192.svg">
           </div>
         </div>
 
+        <!-- Auditor de llegadas (vigilancia 24/7) -->
+        <div id="tab-auditoria-llegadas" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Auditoría de llegadas · Vigilancia 24/7</h3>
+            <button class="btn btn-primary" id="audLlegRefresh">Actualizar</button>
+            <span style="display:inline-flex;gap:4px">
+              <button class="btn btn-primary" id="audLlegFiltroPend">Pendientes</button>
+              <button class="btn btn-ghost" id="audLlegFiltroTodas">Todas</button>
+            </span>
+            <input id="audLlegSearch" type="search" placeholder="Buscar interno / itinerario / tipo…" style="min-width:200px" />
+            <span class="muted">Alertas: <strong id="audLlegCount">0</strong></span>
+            <span class="muted" id="audLlegStatus">Sin cargar</span>
+          </div>
+          <div id="audLlegSalud" style="margin:0 0 12px 0;padding:12px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0"></div>
+          <div class="muted" style="margin:0 0 10px 0">
+            El auditor cruza cada 5 min <b>despacho ↔ GPS real ↔ lista</b> y verifica que las llegadas queden correctas. Las <b>perdidas</b> (llegó y no estaba) las recupera solo; las <b>falsas</b> (está pero no llegó) las alerta aquí para que decidas. Revisa y marca <b>Resuelto</b>.
+          </div>
+          <div style="overflow:auto;max-height:60vh">
+            <table class="ent-tabla">
+              <thead><tr><th>TIPO</th><th>INTERNO</th><th>ITINERARIO</th><th>DETALLE</th><th>DETECTADA</th><th>ACCIÓN</th></tr></thead>
+              <tbody id="audLlegBody"><tr><td colspan="6" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
         <div id="tab-vuelos" class="tab-content">
           <div class="row mobile-filters" style="margin-bottom:10px">
             <h3 style="margin:0">Vuelos MDE (Rionegro)</h3>
@@ -1265,9 +1291,9 @@ n" href="icons/icon-192.svg">
   <div id="mapaFloatingBody"></div>
 </div>
 
-<script src="js/functions.js?v=1.10.157"></script>
-<script src="js/main.js?v=1.10.157"></script>
-<script src="js/pwa.js?v=1.10.157"></script>
+<script src="js/functions.js?v=1.10.159"></script>
+<script src="js/main.js?v=1.10.159"></script>
+<script src="js/pwa.js?v=1.10.159"></script>
 <script>
   // Interruptor de tema claro/oscuro (persistente en localStorage).
   (function(){

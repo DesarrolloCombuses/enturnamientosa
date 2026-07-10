@@ -3065,7 +3065,7 @@ async function loadEnturnamientos(){
   try {
     const { data, error } = await planillaSupabaseClient
       .from(ENTURNAMIENTOS_TABLE)
-      .select("id,interno,placa,mid,reg_id,itinerario,itinerario_id,entro_en,estado,sin_despacho,manual,sentido,driver_id,driver_name,prioridad")
+      .select("id,interno,placa,mid,reg_id,itinerario,itinerario_id,entro_en,estado,sin_despacho,manual,sentido,driver_id,driver_name,prioridad,recuperado")
       .eq("estado", "EN_ESPERA")
       .order("entro_en", { ascending: true });
     if (error) throw error;
@@ -3291,7 +3291,10 @@ function renderListaLlegadas(grid, countEl, rows, vacioMsg){
       ? `<span class="veh-noprog" title="Este interno no está programado hoy">NO PROGRAMADO</span> `
       : "";
     const prio = r?.prioridad === true ? `<span class="veh-prio" title="Prelación: ubicado a mano en esta posición">PRELACIÓN</span> ` : "";
-    const estado = prio + horarioBadge + (esManual
+    const recBadge = r?.recuperado === true
+      ? `<span class="veh-recuperado" title="Recuperado: apareció dentro de la zona destino sin verse el cruce (GPS mudo). Verifícalo.">RECUPERADO</span> `
+      : "";
+    const estado = prio + recBadge + horarioBadge + (esManual
       ? `<span class="veh-manual">MANUAL</span>`
       : sinDesp
       ? `<span class="veh-sindesp">SIN DESPACHO</span>`
@@ -8727,6 +8730,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tabId === 'cumplimiento') refreshCumplimiento();
     if (tabId === 'alertas-gps') { loadGpsDesconexiones(); ensureGpsDescPolling(); }
     if (tabId === 'alertas-despacho') { loadDespAnomalias(); ensureDespAnomPolling(); }
+    if (tabId === 'auditoria-llegadas') { loadAuditorLlegadas(); ensureAudLlegPolling(); }
     if (tabId === 'auditoria-manual') loadAuditoriaManual();
     if (tabId === 'vuelos') { loadVuelos(); ensureVuelosPolling(); }
     if (tabId === 'asistencias') { loadAsistencias(); ensureAsisTick(); }
@@ -8905,6 +8909,22 @@ function bindUIEvents(){
     if (btn) resolverDespAnomalia(btn.getAttribute("data-resolver-anom"));
   });
   ensureDespAnomPendientesPolling();
+
+  // Auditor de llegadas
+  const alRefresh = document.getElementById("audLlegRefresh");
+  if (alRefresh) alRefresh.addEventListener("click", () => loadAuditorLlegadas());
+  const alPend = document.getElementById("audLlegFiltroPend");
+  if (alPend) alPend.addEventListener("click", () => { audLlegSoloPendientes = true; renderAuditorLlegadas(); });
+  const alTodas = document.getElementById("audLlegFiltroTodas");
+  if (alTodas) alTodas.addEventListener("click", () => { audLlegSoloPendientes = false; renderAuditorLlegadas(); });
+  const alSearch = document.getElementById("audLlegSearch");
+  if (alSearch) alSearch.addEventListener("input", () => renderAuditorLlegadas());
+  const alBody = document.getElementById("audLlegBody");
+  if (alBody) alBody.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-resolver-audlleg]");
+    if (btn) resolverAudLleg(btn.getAttribute("data-resolver-audlleg"));
+  });
+  ensureAudLlegPendientesPolling();
 
   // Asistencias
   const aRefresh = document.getElementById("asisRefresh");
@@ -10464,6 +10484,137 @@ function ensureDespAnomPendientesPolling(){
   if (despAnomPendientesTimer) return;
   refreshDespAnomPendientes();
   despAnomPendientesTimer = setInterval(refreshDespAnomPendientes, 90000); // cada 1m30s
+}
+
+/* ============ Auditor de llegadas (vigilancia 24/7) ============ */
+const AUD_LLEG_TABLE = "llegadas_auditoria";
+const AUD_LLEG_ESTADO_TABLE = "llegadas_auditoria_estado";
+let audLlegRows = [];
+let audLlegEstado = null;
+let audLlegPollTimer = null;
+let audLlegPendientesTimer = null;
+let audLlegSoloPendientes = true;
+
+async function loadAuditorLlegadas(){
+  const status = document.getElementById("audLlegStatus");
+  if (status) status.textContent = "Consultando…";
+  try {
+    const [{ data: alertas, error: e1 }, { data: est }] = await Promise.all([
+      planillaSupabaseClient.from(AUD_LLEG_TABLE)
+        .select("id,mid,interno,itinerario,itinerario_id,direccion,tipo,detalle,dist_m,detectada_en,resuelto,resuelto_por,resuelto_en")
+        .order("detectada_en", { ascending: false }).limit(500),
+      planillaSupabaseClient.from(AUD_LLEG_ESTADO_TABLE)
+        .select("last_run,revisadas,ok,falsas,perdidas,en_transito").eq("id", 1).maybeSingle(),
+    ]);
+    if (e1) throw e1;
+    audLlegRows = Array.isArray(alertas) ? alertas : [];
+    audLlegEstado = est || null;
+    renderAuditorLlegadas();
+    refreshAudLlegPendientes();
+    if (status) status.textContent = `Actualizado ${horaCO(new Date())}`;
+  } catch (err) {
+    console.error("[auditor-llegadas] error:", err);
+    if (status) status.textContent = `Error: ${err?.message || "fallo"}`;
+  }
+}
+
+function audLlegTipoBadge(tipo){
+  const map = {
+    falsa: ["#dc2626", "LLEGADA FALSA"],
+    perdida_recuperada: ["#0891b2", "PERDIDA (recuperada)"],
+    inconsistente: ["#d97706", "INCONSISTENTE"],
+  };
+  const [bg, txt] = map[tipo] || ["#64748b", String(tipo || "-").toUpperCase()];
+  return `<span style="display:inline-block;background:${bg};color:#fff;font-weight:700;font-size:11px;padding:2px 9px;border-radius:999px">${txt}</span>`;
+}
+
+function renderAuditorLlegadas(){
+  const salud = document.getElementById("audLlegSalud");
+  if (salud) {
+    const e = audLlegEstado;
+    if (e) {
+      const hora = e.last_run ? horaCO(e.last_run) : "-";
+      salud.innerHTML = `<div class="aud-salud-grid">
+        <div class="aud-kpi"><span class="aud-kpi-n" style="color:#16a34a">${e.ok ?? 0}</span><span class="aud-kpi-l">Correctas</span></div>
+        <div class="aud-kpi"><span class="aud-kpi-n" style="color:#dc2626">${e.falsas ?? 0}</span><span class="aud-kpi-l">Falsas</span></div>
+        <div class="aud-kpi"><span class="aud-kpi-n" style="color:#0891b2">${e.perdidas ?? 0}</span><span class="aud-kpi-l">Recuperadas</span></div>
+        <div class="aud-kpi"><span class="aud-kpi-n" style="color:#64748b">${e.en_transito ?? 0}</span><span class="aud-kpi-l">En tránsito</span></div>
+      </div><div class="muted" style="margin-top:6px">Última revisión: ${hora} · revisadas ${e.revisadas ?? 0}</div>`;
+    } else salud.innerHTML = `<div class="muted">Aún sin datos de auditoría.</div>`;
+  }
+  const body = document.getElementById("audLlegBody");
+  const count = document.getElementById("audLlegCount");
+  if (!body) return;
+  const term = String(document.getElementById("audLlegSearch")?.value || "").trim().toLowerCase();
+  const filas = audLlegRows
+    .filter(r => !audLlegSoloPendientes || !r.resuelto)
+    .filter(r => !term || [r.interno, r.itinerario, r.tipo].join(" ").toLowerCase().includes(term));
+  if (count) count.textContent = String(filas.length);
+  if (!filas.length) {
+    body.innerHTML = `<tr><td colspan="6" class="muted" style="text-align:center;padding:14px">${audLlegSoloPendientes ? "Sin alertas de auditoría pendientes. 👍" : "Sin alertas registradas."}</td></tr>`;
+    return;
+  }
+  body.innerHTML = filas.map(r => {
+    const pend = !r.resuelto;
+    const hora = r.detectada_en ? `${fechaDiaCO(r.detectada_en)} ${horaCO(r.detectada_en)}` : "-";
+    const accion = pend
+      ? `<button class="btn btn-success" data-resolver-audlleg="${escapeHtml(String(r.id))}">Resolver</button>`
+      : `<span class="muted">✅ Resuelto${r.resuelto_por ? " · " + escapeHtml(r.resuelto_por) : ""}</span>`;
+    return `<tr${pend ? ' style="background:#fef2f2"' : ''}>
+      <td>${audLlegTipoBadge(r.tipo)}</td>
+      <td><b>${escapeHtml(r.interno || "-")}</b></td>
+      <td>${escapeHtml(r.itinerario || "-")}</td>
+      <td>${escapeHtml(r.detalle || "-")}</td>
+      <td>${hora}</td>
+      <td>${accion}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function resolverAudLleg(id){
+  if (!id) return;
+  if (!window.confirm("¿Marcar esta alerta como RESUELTA?")) return;
+  try {
+    const { error } = await planillaSupabaseClient.from(AUD_LLEG_TABLE)
+      .update({ resuelto: true, resuelto_por: currentUserEmail || currentUserId || "desconocido", resuelto_en: new Date().toISOString() })
+      .eq("id", id);
+    if (error) throw error;
+    showToast("✅ Alerta resuelta.", "ok");
+    await loadAuditorLlegadas();
+  } catch (err) {
+    console.error("[auditor-llegadas] resolver falló:", err);
+    showToast(`No se pudo: ${err?.message || "error"}`, "err");
+  }
+}
+
+function ensureAudLlegPolling(){
+  if (audLlegPollTimer) return;
+  audLlegPollTimer = setInterval(() => {
+    if (getActiveTabId() === "auditoria-llegadas") loadAuditorLlegadas();
+  }, 120000);
+}
+
+function setAudLlegTabBadge(n){
+  const b = document.getElementById("audLlegTabBadge");
+  if (b) { if (n > 0) { b.textContent = String(n); b.style.display = "inline-block"; } else b.style.display = "none"; }
+}
+
+async function refreshAudLlegPendientes(){
+  if (!currentUserId) return;
+  try {
+    const { count, error } = await planillaSupabaseClient
+      .from(AUD_LLEG_TABLE).select("id", { count: "exact", head: true }).eq("resuelto", false);
+    if (error) throw error;
+    setAudLlegTabBadge(count || 0);
+  } catch (err) {
+    console.debug("[auditor-llegadas] conteo pendientes falló:", err?.message || err);
+  }
+}
+
+function ensureAudLlegPendientesPolling(){
+  if (audLlegPendientesTimer) return;
+  refreshAudLlegPendientes();
+  audLlegPendientesTimer = setInterval(refreshAudLlegPendientes, 90000);
 }
 
 /* ============ Auditoría de ingresos manuales al enturnamiento ============ */

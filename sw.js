@@ -4,7 +4,7 @@
 //   - APIs (Supabase, Google Sheets CSV, CDNs externos, Sonar Flask): pasan directo a la red, NUNCA se cachean.
 //   - Auto-update: skipWaiting + clients.claim para que la nueva version reemplace a la anterior al instante.
 
-const VERSION = "v1.10.159";
+const VERSION = "v1.17.1";
 const CACHE_NAME = `planilla-${VERSION}`;
 const NETWORK_TIMEOUT_MS = 4000;
 

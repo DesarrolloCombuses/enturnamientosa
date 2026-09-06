@@ -4821,15 +4821,26 @@ function findManualDispatchVehicleByInterno(internoValue){
 
 function fillManualDispatchConductorList(baseValue){
   if (!manualDispatchConductorList) return;
+  // Despacho libre: se listan los conductores habilitados de TODAS las bases (no solo
+  // la del vehiculo), para poder despachar cualquier conductor en cualquier base.
   const baseCanonical = getBaseCanonical(baseValue || "");
   const enabled = (driversCatalogRows || [])
     .filter(row => String(row?.status || "").trim().toUpperCase() === "ENABLED")
-    .filter(row => !baseCanonical || getCsvDriverBase(row) === baseCanonical);
+    .slice()
+    .sort((a, b) => {
+      const baseA = getCsvDriverBase(a), baseB = getCsvDriverBase(b);
+      const ownA = baseCanonical && baseA === baseCanonical ? 0 : 1;
+      const ownB = baseCanonical && baseB === baseCanonical ? 0 : 1;
+      if (ownA !== ownB) return ownA - ownB;
+      return String(a?.nombre || "").localeCompare(String(b?.nombre || ""));
+    });
   manualDispatchConductorList.innerHTML = enabled.map(row => {
     const nombre = String(row?.nombre || "").trim();
     const drId = String(row?.dr_id || "").trim();
+    const rowBase = formatBaseLabel(getCsvDriverBase(row));
     const value = `${nombre} | ${drId}`;
-    return `<option value="${escapeHtml(value)}"></option>`;
+    const label = rowBase ? `${nombre} · ${rowBase}` : nombre;
+    return `<option value="${escapeHtml(value)}" label="${escapeHtml(label)}"></option>`;
   }).join("");
 }
 
@@ -8735,6 +8746,8 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tabId === 'vuelos') { loadVuelos(); ensureVuelosPolling(); }
     if (tabId === 'asistencias') { loadAsistencias(); ensureAsisTick(); }
     if (tabId === 'informe-flota') refreshInformeFlota();
+    if (tabId === 'flota-documentos') loadFlotaDocumentos();
+    if (tabId === 'conductor-documentos') loadConductorDocumentos();
     if (tabId === 'tabla-vehiculossonar' && !tablaVehiculosSonarLastLoadedAt) loadTablaVehiculosSonar();
     if (tabId === 'asistencia-biometrica') {
       setTimeout(() => { pushBiometricoSession(); }, 300);
@@ -8765,6 +8778,89 @@ function bindUIEvents(){
   if (conductoresCsvSearch) conductoresCsvSearch.addEventListener("input", renderConductoresCsvTab);
   if (conductoresCsvBaseFilter) conductoresCsvBaseFilter.addEventListener("change", renderConductoresCsvTab);
   if (conductoresCsvStatusFilter) conductoresCsvStatusFilter.addEventListener("change", renderConductoresCsvTab);
+
+  // Documentacion Flota
+  const fdRefresh = document.getElementById("btnRefreshFlotaDoc");
+  if (fdRefresh) fdRefresh.addEventListener("click", () => loadFlotaDocumentos({ force: true }));
+  const fdSearch = document.getElementById("flotaDocSearch");
+  if (fdSearch) fdSearch.addEventListener("input", renderFlotaDocumentosTab);
+  const fdEstadoFilter = document.getElementById("flotaDocEstadoFilter");
+  if (fdEstadoFilter) fdEstadoFilter.addEventListener("change", renderFlotaDocumentosTab);
+  const fdArchivoFilter = document.getElementById("flotaDocArchivoFilter");
+  if (fdArchivoFilter) fdArchivoFilter.addEventListener("change", renderFlotaDocumentosTab);
+  const fdRutaFilter = document.getElementById("flotaDocRutaFilter");
+  if (fdRutaFilter) fdRutaFilter.addEventListener("change", renderFlotaDocumentosTab);
+  const fdBody = document.getElementById("flotaDocBody");
+  if (fdBody) fdBody.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-flotadoc-ver]");
+    if (!btn) return;
+    abrirFlotaDocDetalle(btn.getAttribute("data-flotadoc-ver"));
+  });
+  const fdModalCerrar = document.getElementById("flotaDocModalCerrar");
+  if (fdModalCerrar) fdModalCerrar.addEventListener("click", () => document.getElementById("flotaDocModal")?.classList.add("hidden"));
+  const fdSections = document.getElementById("flotaDocModalSections");
+  if (fdSections) fdSections.addEventListener("click", (ev) => {
+    const subirBtn = ev.target.closest(".flota-doc-subir-btn");
+    if (subirBtn) {
+      const tipo = subirBtn.getAttribute("data-tipo");
+      const section = subirBtn.closest(".flota-doc-section");
+      const fileInput = section?.querySelector(".flota-doc-file-input");
+      const fechaInput = section?.querySelector(".flota-doc-fecha-input");
+      const file = fileInput?.files?.[0];
+      let fechaVencimiento = fechaInput?.value || null;
+      if (tipo === "MANTENIMIENTO_PREVENTIVO" && fechaVencimiento) fechaVencimiento = addMonthsISO(fechaVencimiento, 2);
+      if (flotaDocSelectedPlaca) subirFlotaDocumento(flotaDocSelectedPlaca, tipo, file, fechaVencimiento);
+      return;
+    }
+    const verBtn = ev.target.closest(".flota-doc-ver-btn");
+    if (verBtn) verArchivoFlotaDocumento(verBtn.getAttribute("data-path"));
+  });
+  if (fdSections) fdSections.addEventListener("change", (ev) => {
+    const fileInput = ev.target.closest(".flota-doc-file-input");
+    if (!fileInput) return;
+    const label = fileInput.closest(".doc-file-label")?.querySelector(".doc-file-label-text");
+    if (label) label.textContent = fileInput.files?.[0]?.name || "Elegir archivo…";
+  });
+
+  // Documentacion Conductores
+  const cdRefresh = document.getElementById("btnRefreshConductorDoc");
+  if (cdRefresh) cdRefresh.addEventListener("click", () => loadConductorDocumentos({ force: true }));
+  const cdSearch = document.getElementById("conductorDocSearch");
+  if (cdSearch) cdSearch.addEventListener("input", renderConductorDocumentosTab);
+  const cdEstadoFilter = document.getElementById("conductorDocEstadoFilter");
+  if (cdEstadoFilter) cdEstadoFilter.addEventListener("change", renderConductorDocumentosTab);
+  const cdBody = document.getElementById("conductorDocBody");
+  if (cdBody) cdBody.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button[data-conductordoc-ver]");
+    if (!btn) return;
+    abrirConductorDocDetalle(btn.getAttribute("data-conductordoc-ver"));
+  });
+  const cdModalCerrar = document.getElementById("conductorDocModalCerrar");
+  if (cdModalCerrar) cdModalCerrar.addEventListener("click", () => document.getElementById("conductorDocModal")?.classList.add("hidden"));
+  const cdSections = document.getElementById("conductorDocModalSections");
+  if (cdSections) cdSections.addEventListener("click", (ev) => {
+    const subirBtn = ev.target.closest(".conductor-doc-subir-btn");
+    if (subirBtn) {
+      const tipo = subirBtn.getAttribute("data-tipo");
+      const section = subirBtn.closest(".conductor-doc-section");
+      const fileInput = section?.querySelector(".conductor-doc-file-input");
+      const fechaInput = section?.querySelector(".conductor-doc-fecha-input");
+      const categoriaInput = section?.querySelector(".conductor-doc-categoria-input");
+      const file = fileInput?.files?.[0];
+      if (conductorDocSelectedCedula) {
+        subirConductorDocumento(conductorDocSelectedCedula, tipo, file, fechaInput?.value || null, categoriaInput?.value || null);
+      }
+      return;
+    }
+    const verBtn = ev.target.closest(".conductor-doc-ver-btn");
+    if (verBtn) verArchivoConductorDocumento(verBtn.getAttribute("data-path"));
+  });
+  if (cdSections) cdSections.addEventListener("change", (ev) => {
+    const fileInput = ev.target.closest(".conductor-doc-file-input");
+    if (!fileInput) return;
+    const label = fileInput.closest(".doc-file-label")?.querySelector(".doc-file-label-text");
+    if (label) label.textContent = fileInput.files?.[0]?.name || "Elegir archivo…";
+  });
 
   // Vehiculos Sonar
   if (btnRefreshVehiculosSonar) btnRefreshVehiculosSonar.addEventListener("click", () => loadVehiculosSonarFromSupabase({ force: true }));
@@ -11562,6 +11658,550 @@ function downloadInformeFlota(){
   a.href = url; a.download = `informe_flota_${iflMeta.fecha}.xls`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ==================== DOCUMENTACION FLOTA ====================
+const FLOTA_VEHICULOS_TABLE = "flota_vehiculos";
+const FLOTA_DOC_VIEW = "flota_documentos_estado";
+const FLOTA_DOC_TABLE = "flota_documentos";
+const FLOTA_DOC_BUCKET = "flota-documentos";
+const FLOTA_DOC_TIPOS = [
+  { tipo: "SOAT", label: "SOAT" },
+  { tipo: "TECNOMECANICA", label: "Tecnomecánica" },
+  { tipo: "TARJETA_OPERACION", label: "Tarjeta de Operación" },
+  { tipo: "MANTENIMIENTO_PREVENTIVO", label: "Mantenimiento Preventivo", historial: true, preventivo: true },
+  { tipo: "CERTIFICACION_AMPARO", label: "Certificación de Amparo" },
+  { tipo: "LICENCIA_TRANSITO", label: "Licencia de Tránsito" },
+];
+
+let flotaVehiculosRows = [];
+let flotaDocEstadoRows = [];      // registro MAS RECIENTE por (placa, tipo)
+let flotaDocLastLoadedAt = null;
+let flotaDocSelectedPlaca = null;
+
+function addMonthsISO(isoDate, months){
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoDate || ""));
+  if (!m) return isoDate;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
+
+function flotaDocFmtFecha(iso){
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : "-";
+}
+
+function getFlotaDocEstadoFor(placa, tipo){
+  return flotaDocEstadoRows.find(r => r.placa === placa && r.tipo === tipo) || null;
+}
+
+function docFileTypeInfo(nombreOrPath){
+  const clean = String(nombreOrPath || "").split("?")[0];
+  const ext = (clean.includes(".") ? clean.split(".").pop() : "").toLowerCase();
+  if (ext === "pdf") return { cls: "doc-file-badge-pdf", label: "PDF" };
+  if (["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"].includes(ext)) return { cls: "doc-file-badge-img", label: "IMG" };
+  return { cls: "doc-file-badge-doc", label: ext ? ext.toUpperCase().slice(0, 4) : "ARCH" };
+}
+
+function docFileBadgeHtml(nombreOrPath){
+  const info = docFileTypeInfo(nombreOrPath);
+  return `<span class="doc-file-badge ${info.cls}">${info.label}</span>`;
+}
+
+function flotaDocPillHtml(estadoRow){
+  if (!estadoRow) return `<span class="preop-pill preop-loading">Sin registro</span>`;
+  const map = {
+    VENCIDO: ["preop-missing", "Vencido"],
+    POR_VENCER: ["preop-error", "Por vencer"],
+    VIGENTE: ["preop-ok", "Vigente"],
+    SIN_FECHA: ["preop-loading", "Sin fecha"],
+  };
+  const [cls, label] = map[estadoRow.estado_vencimiento] || ["preop-loading", "-"];
+  const fechaTxt = estadoRow.fecha_vencimiento ? flotaDocFmtFecha(estadoRow.fecha_vencimiento) : "";
+  const archivoIcon = estadoRow.storage_path ? `<span title="Tiene archivo cargado">📎</span> ` : "";
+  return `<span class="preop-pill ${cls}">${archivoIcon}${label}${fechaTxt ? " · " + fechaTxt : ""}</span>`;
+}
+
+async function loadFlotaDocumentos(opts){
+  const force = !!(opts && opts.force);
+  if (!force && flotaDocLastLoadedAt && (Date.now() - flotaDocLastLoadedAt) < 30000) {
+    renderFlotaDocumentosTab();
+    return;
+  }
+  const statusEl = document.getElementById("flotaDocStatus");
+  const btn = document.getElementById("btnRefreshFlotaDoc");
+  if (statusEl) statusEl.textContent = "Cargando...";
+  if (btn) btn.disabled = true;
+  try {
+    const [{ data: vehData, error: vehErr }, { data: docData, error: docErr }] = await Promise.all([
+      planillaSupabaseClient.from(FLOTA_VEHICULOS_TABLE).select("*").order("placa", { ascending: true }),
+      planillaSupabaseClient.from(FLOTA_DOC_VIEW).select("*"),
+    ]);
+    if (vehErr) throw vehErr;
+    if (docErr) throw docErr;
+    flotaVehiculosRows = Array.isArray(vehData) ? vehData : [];
+    flotaDocEstadoRows = Array.isArray(docData) ? docData : [];
+    flotaDocLastLoadedAt = Date.now();
+    populateFlotaDocRutaFilter();
+    renderFlotaDocumentosTab();
+    if (statusEl) statusEl.textContent = `Actualizado: ${horaCO(new Date())} · ${flotaVehiculosRows.length} vehículos`;
+  } catch (err) {
+    console.error("[flota-doc] carga fallo:", err);
+    if (statusEl) statusEl.textContent = `Error: ${err?.message || "fallo"}`;
+    if (typeof showToast === "function") showToast(`No se pudo cargar documentación de flota: ${err?.message || "fallo"}`, "err");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function getFlotaDocRutaLabel(v){
+  return v?.nombre_ruta || v?.ruta || "";
+}
+
+function populateFlotaDocRutaFilter(){
+  const sel = document.getElementById("flotaDocRutaFilter");
+  if (!sel) return;
+  const prev = sel.value;
+  const rutas = Array.from(new Set(flotaVehiculosRows.map(getFlotaDocRutaLabel).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"));
+  sel.innerHTML = `<option value="">Todas las rutas</option>` + rutas.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("");
+  if (prev && rutas.includes(prev)) sel.value = prev;
+}
+
+function getFlotaDocFiltered(){
+  const term = String(document.getElementById("flotaDocSearch")?.value || "").trim().toLowerCase();
+  const estadoFilter = String(document.getElementById("flotaDocEstadoFilter")?.value || "");
+  const archivoFilter = String(document.getElementById("flotaDocArchivoFilter")?.value || "");
+  const rutaFilter = String(document.getElementById("flotaDocRutaFilter")?.value || "");
+  return flotaVehiculosRows.filter(v => {
+    if (term) {
+      const hay = `${v.placa || ""} ${v.interno || ""}`.toLowerCase();
+      if (!hay.includes(term)) return false;
+    }
+    if (estadoFilter) {
+      const anyMatch = FLOTA_DOC_TIPOS.some(t => getFlotaDocEstadoFor(v.placa, t.tipo)?.estado_vencimiento === estadoFilter);
+      if (!anyMatch) return false;
+    }
+    if (archivoFilter) {
+      const tieneAlgunArchivo = FLOTA_DOC_TIPOS.some(t => getFlotaDocEstadoFor(v.placa, t.tipo)?.storage_path);
+      if (archivoFilter === "CON_ARCHIVO" && !tieneAlgunArchivo) return false;
+      if (archivoFilter === "SIN_ARCHIVO" && tieneAlgunArchivo) return false;
+    }
+    if (rutaFilter && getFlotaDocRutaLabel(v) !== rutaFilter) return false;
+    return true;
+  });
+}
+
+function setFlotaDocTabBadge(n){
+  const badge = document.getElementById("flotaDocTabBadge");
+  if (!badge) return;
+  if (n > 0) { badge.textContent = String(n); badge.style.display = "inline-block"; }
+  else { badge.style.display = "none"; }
+}
+
+function renderFlotaDocumentosTab(){
+  const body = document.getElementById("flotaDocBody");
+  if (!body) return;
+  const filtered = getFlotaDocFiltered();
+  const countEl = document.getElementById("flotaDocCount");
+  if (countEl) countEl.textContent = String(filtered.length);
+
+  let vencidosTotal = 0, porVencerTotal = 0;
+  flotaVehiculosRows.forEach(v => {
+    FLOTA_DOC_TIPOS.forEach(t => {
+      const estado = getFlotaDocEstadoFor(v.placa, t.tipo)?.estado_vencimiento;
+      if (estado === "VENCIDO") vencidosTotal++;
+      else if (estado === "POR_VENCER") porVencerTotal++;
+    });
+  });
+  const rv = document.getElementById("flotaDocResumenVencidos");
+  if (rv) rv.textContent = `Vencidos: ${vencidosTotal}`;
+  const rp = document.getElementById("flotaDocResumenPorVencer");
+  if (rp) rp.textContent = `Por vencer: ${porVencerTotal}`;
+  setFlotaDocTabBadge(vencidosTotal + porVencerTotal);
+
+  if (!filtered.length) {
+    body.innerHTML = `<tr><td colspan="11" class="muted" style="text-align:center;padding:12px">Sin vehículos para los filtros.</td></tr>`;
+    return;
+  }
+  body.innerHTML = filtered.map(v => {
+    const cells = FLOTA_DOC_TIPOS.map(t => `<td>${flotaDocPillHtml(getFlotaDocEstadoFor(v.placa, t.tipo))}</td>`).join("");
+    return `<tr>
+      <td>${escapeHtml(v.placa || "-")}</td>
+      <td>${escapeHtml(v.interno || "-")}</td>
+      <td>${escapeHtml(v.marca || "-")} ${escapeHtml(v.modelo || "")}</td>
+      <td>${escapeHtml(getFlotaDocRutaLabel(v) || "-")}</td>
+      ${cells}
+      <td><button class="btn btn-ghost" data-flotadoc-ver="${escapeHtml(v.placa)}">Ver</button></td>
+    </tr>`;
+  }).join("");
+}
+
+function renderFlotaDocSectionHtml(tipoCfg, placa){
+  const estado = getFlotaDocEstadoFor(placa, tipoCfg.tipo);
+  const nombreArchivo = estado?.nombre_archivo_original || "Documento actual";
+  const currentHtml = estado?.storage_path
+    ? `<div class="doc-file-chip">
+        ${docFileBadgeHtml(estado.nombre_archivo_original || estado.storage_path)}
+        <span class="doc-file-name" title="${escapeHtml(nombreArchivo)}">${escapeHtml(nombreArchivo)}</span>
+        <button type="button" class="btn btn-ghost btn-sm flota-doc-ver-btn" data-path="${escapeHtml(estado.storage_path)}">Ver</button>
+      </div>`
+    : `<div class="doc-file-empty">Sin documento cargado todavía</div>`;
+  return `
+    <div class="doc-card flota-doc-section" data-tipo="${tipoCfg.tipo}">
+      <div class="doc-card-head">
+        <div class="doc-card-title"><span class="doc-type-icon">📄</span><strong>${escapeHtml(tipoCfg.label)}</strong></div>
+        ${flotaDocPillHtml(estado)}
+      </div>
+      ${currentHtml}
+      <div class="doc-card-upload">
+        <label class="doc-file-label">
+          <input type="file" class="flota-doc-file-input" data-tipo="${tipoCfg.tipo}" accept=".pdf,image/*" />
+          <span class="doc-file-label-icon">📎</span>
+          <span class="doc-file-label-text">Elegir archivo…</span>
+        </label>
+        <input type="date" class="flota-doc-fecha-input" data-tipo="${tipoCfg.tipo}" title="${tipoCfg.preventivo ? "Fecha en que se realizó el mantenimiento" : "Fecha de vencimiento"}" />
+        <button type="button" class="btn btn-primary btn-sm flota-doc-subir-btn" data-tipo="${tipoCfg.tipo}">Subir</button>
+      </div>
+      ${tipoCfg.preventivo ? `<div class="muted" style="margin-top:6px">Ingresa la fecha en que se hizo el mantenimiento; el próximo vencimiento se calcula automáticamente (+2 meses).</div>` : ""}
+      <details class="doc-historial">
+        <summary>Historial de cambios${tipoCfg.historial ? (tipoCfg.preventivo ? " · cada 2 meses (Res. 315/2013)" : " · revisión cada 2 meses") : ""}</summary>
+        <div class="flota-doc-historial-body" data-tipo="${tipoCfg.tipo}">Cargando historial…</div>
+      </details>
+    </div>`;
+}
+
+async function abrirFlotaDocDetalle(placa){
+  const veh = flotaVehiculosRows.find(v => v.placa === placa);
+  if (!veh) return;
+  flotaDocSelectedPlaca = placa;
+  const modal = document.getElementById("flotaDocModal");
+  const title = document.getElementById("flotaDocModalTitle");
+  const sub = document.getElementById("flotaDocModalSub");
+  const sections = document.getElementById("flotaDocModalSections");
+  if (!modal || !sections) return;
+  if (title) title.textContent = `Documentación · ${veh.placa}`;
+  if (sub) sub.textContent = `Interno ${veh.interno || "-"} · ${veh.marca || ""} ${veh.modelo || ""}`.trim();
+  sections.innerHTML = FLOTA_DOC_TIPOS.map(t => renderFlotaDocSectionHtml(t, veh.placa)).join("");
+  modal.classList.remove("hidden");
+  await Promise.all(FLOTA_DOC_TIPOS.map(t => cargarHistorialTipo(placa, t.tipo)));
+}
+
+async function cargarHistorialTipo(placa, tipo){
+  const body = document.querySelector(`.flota-doc-historial-body[data-tipo="${tipo}"]`);
+  if (!body) return;
+  body.innerHTML = "Cargando historial…";
+  try {
+    const { data, error } = await planillaSupabaseClient
+      .from(FLOTA_DOC_TABLE)
+      .select("id, fecha_vencimiento, storage_path, nombre_archivo_original, created_at")
+      .eq("placa", placa)
+      .eq("tipo", tipo)
+      .order("fecha_vencimiento", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    const rows = Array.isArray(data) ? data : [];
+    if (!rows.length) {
+      body.innerHTML = `<div class="muted">Sin registros todavía.</div>`;
+      return;
+    }
+    body.innerHTML = `<div class="doc-historial-table" style="max-height:180px;overflow:auto"><table class="ent-tabla" style="width:100%">
+      <thead><tr><th></th><th>Vencimiento</th><th>Cargado</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td>${docFileBadgeHtml(r.nombre_archivo_original || r.storage_path)}</td>
+            <td>${flotaDocFmtFecha(r.fecha_vencimiento)}</td>
+            <td>${fechaHoraCO(r.created_at)}</td>
+            <td>${r.storage_path ? `<button type="button" class="btn btn-ghost btn-sm flota-doc-ver-btn" data-path="${escapeHtml(r.storage_path)}">Ver</button>` : "-"}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table></div>`;
+  } catch (err) {
+    console.error(`[flota-doc] historial ${tipo} fallo:`, err);
+    body.innerHTML = `<div class="muted">Error cargando historial.</div>`;
+  }
+}
+
+async function subirFlotaDocumento(placa, tipo, file, fechaVencimiento){
+  if (!file) { showToast("Selecciona un archivo antes de subir.", "err"); return; }
+  try {
+    const stamp = Date.now();
+    const safeName = String(file.name || "documento").replace(/[^\w.\-]+/g, "_");
+    const path = `${placa}/${tipo}/${stamp}_${safeName}`;
+    const { error: upErr } = await planillaSupabaseClient.storage
+      .from(FLOTA_DOC_BUCKET)
+      .upload(path, file, { upsert: false, contentType: file.type || undefined });
+    if (upErr) throw upErr;
+    const { error: insErr } = await planillaSupabaseClient.from(FLOTA_DOC_TABLE).insert({
+      placa,
+      tipo,
+      fecha_vencimiento: fechaVencimiento || null,
+      storage_path: path,
+      nombre_archivo_original: file.name || null,
+    });
+    if (insErr) throw insErr;
+    showToast("Documento subido correctamente.", "ok");
+    await loadFlotaDocumentos({ force: true });
+    if (flotaDocSelectedPlaca === placa) await abrirFlotaDocDetalle(placa);
+  } catch (err) {
+    console.error("[flota-doc] subida fallo:", err);
+    showToast(`No se pudo subir el documento: ${err?.message || "fallo"}`, "err");
+  }
+}
+
+async function verArchivoFlotaDocumento(storagePath){
+  if (!storagePath) return;
+  try {
+    const { data, error } = await planillaSupabaseClient.storage
+      .from(FLOTA_DOC_BUCKET)
+      .createSignedUrl(storagePath, 120);
+    if (error) throw error;
+    if (data?.signedUrl) window.open(data.signedUrl, "_blank", "noopener");
+  } catch (err) {
+    console.error("[flota-doc] ver archivo fallo:", err);
+    showToast(`No se pudo abrir el archivo: ${err?.message || "fallo"}`, "err");
+  }
+}
+
+// ==================== DOCUMENTACION CONDUCTORES ====================
+const CONDUCTOR_DOC_VIEW = "conductor_documentos_estado";
+const CONDUCTOR_DOC_TABLE = "conductor_documentos";
+const CONDUCTOR_DOC_BUCKET = "conductor-documentos";
+const CONDUCTOR_DOC_TIPOS = [
+  { tipo: "LICENCIA_CONDUCCION", label: "Licencia de Conducción", categoria: true },
+];
+
+let conductorDocEstadoRows = [];
+let conductorDocLastLoadedAt = null;
+let conductorDocSelectedCedula = null;
+
+function getConductorDocEstadoFor(cedula, tipo){
+  return conductorDocEstadoRows.find(r => r.cedula === cedula && r.tipo === tipo) || null;
+}
+
+function getConductorDocDrivers(){
+  return driversCatalogRows.filter(d => d.status !== "DISABLED");
+}
+
+async function loadConductorDocumentos(opts){
+  const force = !!(opts && opts.force);
+  const statusEl = document.getElementById("conductorDocStatus");
+  const btn = document.getElementById("btnRefreshConductorDoc");
+  if (statusEl) statusEl.textContent = "Cargando...";
+  if (btn) btn.disabled = true;
+  try {
+    const tasks = [];
+    if (force || !driversCatalogRows.length) tasks.push(loadDriversFromCSV());
+    const [, docResult] = await Promise.all([
+      Promise.all(tasks),
+      planillaSupabaseClient.from(CONDUCTOR_DOC_VIEW).select("*"),
+    ]);
+    const { data: docData, error: docErr } = docResult;
+    if (docErr) throw docErr;
+    conductorDocEstadoRows = Array.isArray(docData) ? docData : [];
+    conductorDocLastLoadedAt = Date.now();
+    renderConductorDocumentosTab();
+    if (statusEl) statusEl.textContent = `Actualizado: ${horaCO(new Date())} · ${getConductorDocDrivers().length} conductores`;
+  } catch (err) {
+    console.error("[conductor-doc] carga fallo:", err);
+    if (statusEl) statusEl.textContent = `Error: ${err?.message || "fallo"}`;
+    if (typeof showToast === "function") showToast(`No se pudo cargar documentación de conductores: ${err?.message || "fallo"}`, "err");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function getConductorDocFiltered(){
+  const term = String(document.getElementById("conductorDocSearch")?.value || "").trim().toLowerCase();
+  const estadoFilter = String(document.getElementById("conductorDocEstadoFilter")?.value || "");
+  return getConductorDocDrivers().filter(d => {
+    if (term) {
+      const hay = `${d.nombre || ""} ${d.cedula || ""}`.toLowerCase();
+      if (!hay.includes(term)) return false;
+    }
+    if (estadoFilter) {
+      const anyMatch = CONDUCTOR_DOC_TIPOS.some(t => getConductorDocEstadoFor(d.cedula, t.tipo)?.estado_vencimiento === estadoFilter);
+      if (!anyMatch) return false;
+    }
+    return true;
+  });
+}
+
+function setConductorDocTabBadge(n){
+  const badge = document.getElementById("conductorDocTabBadge");
+  if (!badge) return;
+  if (n > 0) { badge.textContent = String(n); badge.style.display = "inline-block"; }
+  else { badge.style.display = "none"; }
+}
+
+function renderConductorDocumentosTab(){
+  const body = document.getElementById("conductorDocBody");
+  if (!body) return;
+  const filtered = getConductorDocFiltered();
+  const countEl = document.getElementById("conductorDocCount");
+  if (countEl) countEl.textContent = String(filtered.length);
+
+  let vencidosTotal = 0, porVencerTotal = 0;
+  getConductorDocDrivers().forEach(d => {
+    CONDUCTOR_DOC_TIPOS.forEach(t => {
+      const estado = getConductorDocEstadoFor(d.cedula, t.tipo)?.estado_vencimiento;
+      if (estado === "VENCIDO") vencidosTotal++;
+      else if (estado === "POR_VENCER") porVencerTotal++;
+    });
+  });
+  const rv = document.getElementById("conductorDocResumenVencidos");
+  if (rv) rv.textContent = `Vencidos: ${vencidosTotal}`;
+  const rp = document.getElementById("conductorDocResumenPorVencer");
+  if (rp) rp.textContent = `Por vencer: ${porVencerTotal}`;
+  setConductorDocTabBadge(vencidosTotal + porVencerTotal);
+
+  if (!filtered.length) {
+    body.innerHTML = `<tr><td colspan="5" class="muted" style="text-align:center;padding:12px">Sin conductores para los filtros.</td></tr>`;
+    return;
+  }
+  body.innerHTML = filtered.map(d => {
+    const cells = CONDUCTOR_DOC_TIPOS.map(t => `<td>${flotaDocPillHtml(getConductorDocEstadoFor(d.cedula, t.tipo))}</td>`).join("");
+    return `<tr>
+      <td>${escapeHtml(d.cedula || "-")}</td>
+      <td>${escapeHtml(d.nombre || "-")}</td>
+      <td>${escapeHtml(formatBaseLabel(d.base || ""))}</td>
+      ${cells}
+      <td><button class="btn btn-ghost" data-conductordoc-ver="${escapeHtml(d.cedula)}">Ver</button></td>
+    </tr>`;
+  }).join("");
+}
+
+function renderConductorDocSectionHtml(tipoCfg, cedula){
+  const estado = getConductorDocEstadoFor(cedula, tipoCfg.tipo);
+  const nombreArchivo = estado?.nombre_archivo_original || "Documento actual";
+  const currentHtml = estado?.storage_path
+    ? `<div class="doc-file-chip">
+        ${docFileBadgeHtml(estado.nombre_archivo_original || estado.storage_path)}
+        <span class="doc-file-name" title="${escapeHtml(nombreArchivo)}">${escapeHtml(nombreArchivo)}</span>
+        ${estado?.categoria_licencia ? `<span class="pill">Cat. ${escapeHtml(estado.categoria_licencia)}</span>` : ""}
+        <button type="button" class="btn btn-ghost btn-sm conductor-doc-ver-btn" data-path="${escapeHtml(estado.storage_path)}">Ver</button>
+      </div>`
+    : `<div class="doc-file-empty">Sin documento cargado todavía</div>`;
+  return `
+    <div class="doc-card conductor-doc-section" data-tipo="${tipoCfg.tipo}">
+      <div class="doc-card-head">
+        <div class="doc-card-title"><span class="doc-type-icon">🪪</span><strong>${escapeHtml(tipoCfg.label)}</strong></div>
+        ${flotaDocPillHtml(estado)}
+      </div>
+      ${currentHtml}
+      <div class="doc-card-upload">
+        <label class="doc-file-label">
+          <input type="file" class="conductor-doc-file-input" data-tipo="${tipoCfg.tipo}" accept=".pdf,image/*" />
+          <span class="doc-file-label-icon">📎</span>
+          <span class="doc-file-label-text">Elegir archivo…</span>
+        </label>
+        ${tipoCfg.categoria ? `<input type="text" class="conductor-doc-categoria-input" placeholder="Categoría (ej. C2)" value="${escapeHtml(estado?.categoria_licencia || "")}" />` : ""}
+        <input type="date" class="conductor-doc-fecha-input" data-tipo="${tipoCfg.tipo}" title="Fecha de vencimiento" />
+        <button type="button" class="btn btn-primary btn-sm conductor-doc-subir-btn" data-tipo="${tipoCfg.tipo}">Subir</button>
+      </div>
+      <details class="doc-historial">
+        <summary>Historial de cambios</summary>
+        <div class="conductor-doc-historial-body" data-tipo="${tipoCfg.tipo}">Cargando historial…</div>
+      </details>
+    </div>`;
+}
+
+async function abrirConductorDocDetalle(cedula){
+  const drv = driversCatalogRows.find(d => d.cedula === cedula);
+  if (!drv) return;
+  conductorDocSelectedCedula = cedula;
+  const modal = document.getElementById("conductorDocModal");
+  const title = document.getElementById("conductorDocModalTitle");
+  const sub = document.getElementById("conductorDocModalSub");
+  const sections = document.getElementById("conductorDocModalSections");
+  if (!modal || !sections) return;
+  if (title) title.textContent = `Documentación · ${drv.nombre || cedula}`;
+  if (sub) sub.textContent = `Cédula ${cedula} · ${formatBaseLabel(drv.base || "")}`;
+  sections.innerHTML = CONDUCTOR_DOC_TIPOS.map(t => renderConductorDocSectionHtml(t, cedula)).join("");
+  modal.classList.remove("hidden");
+  await Promise.all(CONDUCTOR_DOC_TIPOS.map(t => cargarHistorialConductorTipo(cedula, t.tipo)));
+}
+
+async function cargarHistorialConductorTipo(cedula, tipo){
+  const body = document.querySelector(`.conductor-doc-historial-body[data-tipo="${tipo}"]`);
+  if (!body) return;
+  body.innerHTML = "Cargando historial…";
+  try {
+    const { data, error } = await planillaSupabaseClient
+      .from(CONDUCTOR_DOC_TABLE)
+      .select("id, fecha_vencimiento, categoria_licencia, storage_path, nombre_archivo_original, created_at")
+      .eq("cedula", cedula)
+      .eq("tipo", tipo)
+      .order("fecha_vencimiento", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    const rows = Array.isArray(data) ? data : [];
+    if (!rows.length) {
+      body.innerHTML = `<div class="muted">Sin registros todavía.</div>`;
+      return;
+    }
+    body.innerHTML = `<div class="doc-historial-table" style="max-height:180px;overflow:auto"><table class="ent-tabla" style="width:100%">
+      <thead><tr><th></th><th>Vencimiento</th><th>Categoría</th><th>Cargado</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td>${docFileBadgeHtml(r.nombre_archivo_original || r.storage_path)}</td>
+            <td>${flotaDocFmtFecha(r.fecha_vencimiento)}</td>
+            <td>${escapeHtml(r.categoria_licencia || "-")}</td>
+            <td>${fechaHoraCO(r.created_at)}</td>
+            <td>${r.storage_path ? `<button type="button" class="btn btn-ghost btn-sm conductor-doc-ver-btn" data-path="${escapeHtml(r.storage_path)}">Ver</button>` : "-"}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table></div>`;
+  } catch (err) {
+    console.error(`[conductor-doc] historial ${tipo} fallo:`, err);
+    body.innerHTML = `<div class="muted">Error cargando historial.</div>`;
+  }
+}
+
+async function subirConductorDocumento(cedula, tipo, file, fechaVencimiento, categoriaLicencia){
+  if (!file) { showToast("Selecciona un archivo antes de subir.", "err"); return; }
+  try {
+    const stamp = Date.now();
+    const safeName = String(file.name || "documento").replace(/[^\w.\-]+/g, "_");
+    const path = `${cedula}/${tipo}/${stamp}_${safeName}`;
+    const { error: upErr } = await planillaSupabaseClient.storage
+      .from(CONDUCTOR_DOC_BUCKET)
+      .upload(path, file, { upsert: false, contentType: file.type || undefined });
+    if (upErr) throw upErr;
+    const drv = driversCatalogRows.find(d => d.cedula === cedula);
+    const { error: insErr } = await planillaSupabaseClient.from(CONDUCTOR_DOC_TABLE).insert({
+      cedula,
+      nombre_conductor: drv?.nombre || null,
+      tipo,
+      categoria_licencia: categoriaLicencia || null,
+      fecha_vencimiento: fechaVencimiento || null,
+      storage_path: path,
+      nombre_archivo_original: file.name || null,
+    });
+    if (insErr) throw insErr;
+    showToast("Documento subido correctamente.", "ok");
+    await loadConductorDocumentos({ force: true });
+    if (conductorDocSelectedCedula === cedula) await abrirConductorDocDetalle(cedula);
+  } catch (err) {
+    console.error("[conductor-doc] subida fallo:", err);
+    showToast(`No se pudo subir el documento: ${err?.message || "fallo"}`, "err");
+  }
+}
+
+async function verArchivoConductorDocumento(storagePath){
+  if (!storagePath) return;
+  try {
+    const { data, error } = await planillaSupabaseClient.storage
+      .from(CONDUCTOR_DOC_BUCKET)
+      .createSignedUrl(storagePath, 120);
+    if (error) throw error;
+    if (data?.signedUrl) window.open(data.signedUrl, "_blank", "noopener");
+  } catch (err) {
+    console.error("[conductor-doc] ver archivo fallo:", err);
+    showToast(`No se pudo abrir el archivo: ${err?.message || "fallo"}`, "err");
+  }
 }
 
 // ==================== INIT ====================

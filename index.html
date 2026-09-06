@@ -127,6 +127,8 @@ n" href="icons/icon-192.svg">
           <div class="tab" data-tab="vuelos">Vuelos MDE</div>
           <div class="tab" data-tab="asistencias">Asistencias</div>
           <div class="tab" data-tab="informe-flota">Informe Flota</div>
+          <div class="tab" data-tab="flota-documentos">Documentación Flota <span id="flotaDocTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
+          <div class="tab" data-tab="conductor-documentos">Documentación Conductores <span id="conductorDocTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
           <div class="tab hidden" data-tab="tabla-vehiculossonar">Tabla vehiculossonar</div>
         </div>
         <div class="mobile-tab-switcher" id="mobileTabSwitcher">
@@ -976,6 +978,96 @@ n" href="icons/icon-192.svg">
           </div>
         </div>
 
+        <!-- Contenido Documentación Flota -->
+        <div id="tab-flota-documentos" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Documentación de la flota (COMBUSES)</h3>
+            <button class="btn btn-ghost" id="btnRefreshFlotaDoc">Actualizar</button>
+            <input id="flotaDocSearch" type="text" placeholder="Buscar placa o interno..." />
+            <select id="flotaDocEstadoFilter">
+              <option value="">Todos los estados</option>
+              <option value="VENCIDO">Vencidos</option>
+              <option value="POR_VENCER">Por vencer (≤30 días)</option>
+              <option value="VIGENTE">Vigentes</option>
+              <option value="SIN_FECHA">Sin fecha</option>
+            </select>
+            <select id="flotaDocArchivoFilter">
+              <option value="">Con o sin archivo</option>
+              <option value="CON_ARCHIVO">📎 Con archivo cargado</option>
+              <option value="SIN_ARCHIVO">Sin archivo cargado</option>
+            </select>
+            <select id="flotaDocRutaFilter">
+              <option value="">Todas las rutas</option>
+            </select>
+            <span class="muted">Vehículos: <strong id="flotaDocCount">0</strong></span>
+            <span class="muted" id="flotaDocStatus">Sin cargar</span>
+          </div>
+          <div class="row" style="gap:8px;margin-bottom:10px">
+            <span class="preop-pill preop-missing" id="flotaDocResumenVencidos">Vencidos: 0</span>
+            <span class="preop-pill preop-error" id="flotaDocResumenPorVencer">Por vencer: 0</span>
+          </div>
+          <div style="overflow:auto;max-height:62vh">
+            <table id="flotaDocTable" class="ent-tabla">
+              <thead>
+                <tr>
+                  <th>Placa</th>
+                  <th>Interno</th>
+                  <th>Marca / Modelo</th>
+                  <th>Ruta</th>
+                  <th>SOAT</th>
+                  <th>Tecnomecánica</th>
+                  <th>Tarjeta Operación</th>
+                  <th>Mant. Preventivo</th>
+                  <th>Certificación Amparo</th>
+                  <th>Licencia Tránsito</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="flotaDocBody">
+                <tr><td colspan="11" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Contenido Documentación Conductores -->
+        <div id="tab-conductor-documentos" class="tab-content">
+          <div class="row mobile-filters" style="margin-bottom:10px">
+            <h3 style="margin:0">Documentación de conductores</h3>
+            <button class="btn btn-ghost" id="btnRefreshConductorDoc">Actualizar</button>
+            <input id="conductorDocSearch" type="text" placeholder="Buscar nombre o cédula..." />
+            <select id="conductorDocEstadoFilter">
+              <option value="">Todos los estados</option>
+              <option value="VENCIDO">Vencidos</option>
+              <option value="POR_VENCER">Por vencer (≤30 días)</option>
+              <option value="VIGENTE">Vigentes</option>
+              <option value="SIN_FECHA">Sin fecha</option>
+            </select>
+            <span class="muted">Conductores: <strong id="conductorDocCount">0</strong></span>
+            <span class="muted" id="conductorDocStatus">Sin cargar</span>
+          </div>
+          <div class="row" style="gap:8px;margin-bottom:10px">
+            <span class="preop-pill preop-missing" id="conductorDocResumenVencidos">Vencidos: 0</span>
+            <span class="preop-pill preop-error" id="conductorDocResumenPorVencer">Por vencer: 0</span>
+          </div>
+          <div style="overflow:auto;max-height:62vh">
+            <table id="conductorDocTable" class="ent-tabla">
+              <thead>
+                <tr>
+                  <th>Cédula</th>
+                  <th>Nombre</th>
+                  <th>Base</th>
+                  <th>Licencia de Conducción</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="conductorDocBody">
+                <tr><td colspan="5" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -1018,6 +1110,30 @@ n" href="icons/icon-192.svg">
     <div class="modal-actions" style="margin-top:12px">
       <button class="btn btn-ghost" id="gpsHistCerrar">Cerrar</button>
       <button class="btn btn-success" id="gpsHistDownload">Descargar historial</button>
+    </div>
+  </div>
+</div>
+<div id="flotaDocModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="flotaDocModalTitle">
+  <div class="modal-card" style="max-width:760px;width:96%;max-height:90vh;display:flex;flex-direction:column">
+    <h3 id="flotaDocModalTitle" class="modal-title">Documentación del vehículo</h3>
+    <div class="modal-sub" id="flotaDocModalSub">-</div>
+    <div id="flotaDocModalSections" style="margin-top:10px;display:flex;flex-direction:column;gap:14px;overflow-y:auto;min-height:0;flex:1 1 auto">
+      <!-- Se llenan por JS: SOAT, Tecnomecanica, Tarjeta Operacion, Certificacion Amparo, Licencia Transito + Mantenimiento Preventivo (con historial cada 2 meses) -->
+    </div>
+    <div class="modal-actions" style="margin-top:12px;flex:0 0 auto">
+      <button class="btn btn-ghost" id="flotaDocModalCerrar">Cerrar</button>
+    </div>
+  </div>
+</div>
+<div id="conductorDocModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="conductorDocModalTitle">
+  <div class="modal-card" style="max-width:760px;width:96%;max-height:90vh;display:flex;flex-direction:column">
+    <h3 id="conductorDocModalTitle" class="modal-title">Documentación del conductor</h3>
+    <div class="modal-sub" id="conductorDocModalSub">-</div>
+    <div id="conductorDocModalSections" style="margin-top:10px;display:flex;flex-direction:column;gap:14px;overflow-y:auto;min-height:0;flex:1 1 auto">
+      <!-- Se llena por JS -->
+    </div>
+    <div class="modal-actions" style="margin-top:12px;flex:0 0 auto">
+      <button class="btn btn-ghost" id="conductorDocModalCerrar">Cerrar</button>
     </div>
   </div>
 </div>
@@ -1291,9 +1407,9 @@ n" href="icons/icon-192.svg">
   <div id="mapaFloatingBody"></div>
 </div>
 
-<script src="js/functions.js?v=1.10.159"></script>
-<script src="js/main.js?v=1.10.159"></script>
-<script src="js/pwa.js?v=1.10.159"></script>
+<script src="js/functions.js?v=1.17.1"></script>
+<script src="js/main.js?v=1.17.1"></script>
+<script src="js/pwa.js?v=1.17.1"></script>
 <script>
   // Interruptor de tema claro/oscuro (persistente en localStorage).
   (function(){

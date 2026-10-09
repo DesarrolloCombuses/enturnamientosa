@@ -1,0 +1,354 @@
+/* ============================================================
+   Combuses · Marco tipo ERP
+   Menu lateral por modulos + barra superior con la seccion activa
+   + contenido en tarjetas planas. Va despues de styles.css y solo
+   reacomoda la presentacion: las pestanas siguen siendo los mismos
+   .tab[data-tab] que maneja functions.js.
+   Las reglas llevan #appWrap para ganarle a los ajustes antiguos
+   (incluido el modo oscuro, que usa html[data-theme] .clase).
+   ============================================================ */
+
+:root{
+  --sb-w:256px;
+  --top-h:64px;
+
+  /* menu lateral verde oscuro (tambien en modo claro, como los ERP) */
+  --sb-bg:#0f3d2e;
+  --sb-line:rgba(255,255,255,.08);
+  --sb-fg:#cfe3d9;
+  --sb-fg-strong:#ffffff;
+  --sb-fg-soft:#8fb3a2;
+  --sb-hover:rgba(255,255,255,.07);
+  --sb-active:rgba(110,231,183,.16);
+  --sb-accent:#6ee7b7;
+  --sb-mark:linear-gradient(135deg, #34d399 0%, #059669 100%);
+
+  /* lienzo gris claro: las tarjetas blancas se separan solas */
+  --bg:#f3f5f9;
+}
+html[data-theme="dark"]{
+  --sb-bg:#10241b;
+  --sb-line:#1f3a2d;
+  --sb-fg:#c2d6cc;
+  --sb-fg-strong:#ffffff;
+  --sb-fg-soft:#7c9a8b;
+  --sb-hover:#173126;
+  --sb-active:#1d4a35;
+  --sb-accent:#4ade80;
+}
+
+/* Fondo plano (antes tenia brillos radiales) */
+body{background:var(--bg);background-attachment:scroll}
+
+/* =============== Estructura =============== */
+#appWrap.app-shell{
+  display:grid;
+  grid-template-columns:var(--sb-w) minmax(0,1fr);
+  min-height:100vh;
+  padding:0;
+}
+#appWrap.app-shell.hidden{display:none !important}
+
+/* =============== Menu lateral =============== */
+#appWrap .sidebar{
+  position:sticky;
+  top:0;
+  height:100vh;
+  height:100dvh;
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+  background:var(--sb-bg);
+  color:var(--sb-fg);
+  border-right:1px solid var(--sb-line);
+  z-index:30;
+}
+#appWrap .sidebar-brand{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  height:var(--top-h);
+  padding:0 18px;
+  margin:0;
+  border-bottom:1px solid var(--sb-line);
+  flex:none;
+}
+#appWrap .sidebar-brand .brand-mark{background:var(--sb-mark);box-shadow:none;width:34px;height:34px;border-radius:9px;font-size:17px}
+#appWrap .sidebar-brand .brand-text{display:flex}
+#appWrap .sidebar-brand .brand-text strong{color:var(--sb-fg-strong);font-size:15px}
+#appWrap .sidebar-brand .brand-text small{color:var(--sb-fg-soft);font-size:10px}
+
+#appWrap .side-nav{
+  flex:1 1 auto;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  padding:8px 10px 20px;
+}
+#appWrap .side-nav::-webkit-scrollbar{width:8px}
+#appWrap .side-nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border:2px solid transparent;background-clip:content-box}
+
+#appWrap .nav-group{margin-top:16px}
+#appWrap .nav-group:first-child{margin-top:8px}
+/* Un modulo sin pestanas visibles no muestra su titulo */
+#appWrap .nav-group:not(:has(.tab:not(.hidden))){display:none}
+#appWrap .nav-group-title{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:0 10px 6px;
+  font-size:10.5px;
+  font-weight:700;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--sb-fg-soft);
+}
+#appWrap .nav-group-title svg{
+  width:15px;
+  height:15px;
+  flex:none;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.8;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+
+#appWrap .side-nav .tab{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:100%;
+  min-height:34px;
+  margin:1px 0;
+  padding:7px 10px 7px 33px;
+  border:0;
+  border-radius:7px;
+  background:transparent;
+  color:var(--sb-fg);
+  font-size:13px;
+  font-weight:500;
+  line-height:1.25;
+  white-space:normal;
+  box-shadow:none;
+  transform:none;
+  user-select:none;
+}
+#appWrap .side-nav .tab:hover{background:var(--sb-hover);color:var(--sb-fg-strong)}
+#appWrap .side-nav .tab.active{
+  background:var(--sb-active);
+  color:var(--sb-fg-strong);
+  font-weight:600;
+  box-shadow:none;
+  transform:none;
+}
+#appWrap .side-nav .tab.active::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:7px;
+  bottom:7px;
+  width:3px;
+  border-radius:0 3px 3px 0;
+  background:var(--sb-accent);
+}
+#appWrap .side-nav .tab:focus-visible{outline:2px solid var(--sb-accent);outline-offset:-2px}
+/* Los contadores rojos de cada pestana van a la derecha */
+#appWrap .side-nav .tab > span{margin-left:auto !important;flex:none}
+
+#appWrap .sidebar-scrim{display:none}
+
+/* =============== Barra superior =============== */
+#appWrap .app-main{min-width:0;display:flex;flex-direction:column}
+#appWrap .topbar{
+  position:sticky;
+  top:0;
+  z-index:20;
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  flex-wrap:nowrap;
+  gap:14px;
+  min-height:var(--top-h);
+  margin:0;
+  padding:10px 24px;
+  background:var(--bg-elev);
+  border:0;
+  border-bottom:1px solid var(--line);
+  border-radius:0;
+  box-shadow:none;
+}
+#appWrap .nav-toggle{display:none;width:38px;height:38px;padding:0;align-items:center;justify-content:center;flex:none}
+#appWrap .nav-toggle svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+#appWrap .page-head{flex:1 1 auto;min-width:0}
+#appWrap .page-crumb{
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+  color:var(--fg-soft);
+  line-height:1.2;
+}
+#appWrap .page-title{
+  margin:1px 0 0;
+  font-size:19px;
+  font-weight:700;
+  line-height:1.2;
+  color:var(--fg);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+#appWrap .topbar-actions{display:flex;align-items:center;gap:8px;flex:none;min-width:0}
+#appWrap #btnThemeToggle{width:38px;height:38px;padding:0;justify-content:center}
+#appWrap .topbar .pill{
+  background:var(--bg-muted);
+  border:1px solid var(--line);
+  color:var(--fg-muted);
+  box-shadow:none;
+  white-space:nowrap;
+}
+#appWrap .user-chip{display:inline-flex;align-items:center;gap:7px;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+#appWrap .user-chip::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
+
+/* =============== Contenido =============== */
+#appWrap .app-content{padding:20px 24px 32px;min-width:0}
+#appWrap #operativoPanel,
+#appWrap #operativoInner > .card{
+  background:transparent;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+  padding:0;
+  overflow:visible;
+}
+#appWrap #operativoInner > .card:hover{box-shadow:none}
+/* El titulo ahora lo da la barra superior; en celular se navega con el menu */
+#appWrap #operativoMainTitle,
+#appWrap .mobile-tab-switcher{display:none !important}
+
+/* Cada seccion es una tarjeta */
+#appWrap .tab-content.active{
+  background:var(--bg-elev);
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:18px 20px;
+  box-shadow:var(--shadow-sm);
+}
+/* Primera fila de cada seccion = barra de herramientas */
+#appWrap .tab-content > .row:first-child{
+  padding-bottom:14px;
+  margin-bottom:14px !important;
+  border-bottom:1px solid var(--line);
+  gap:8px;
+}
+#appWrap .tab-content > .row:first-child > h3{font-size:16px;margin-right:6px}
+
+/* =============== Resumen de alistamientos SICOV =============== */
+#appWrap .sicov-resumen{display:grid;gap:8px;margin:0 0 12px}
+#appWrap .sicov-resumen:empty{display:none}
+#appWrap .sicov-resumen-linea{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:14px}
+#appWrap .sicov-cifra{font-size:20px;font-variant-numeric:tabular-nums}
+#appWrap .sicov-faltan{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+#appWrap .sicov-falta{display:inline-flex;gap:4px;padding:2px 9px;border-radius:999px;background:var(--err-soft);color:var(--err);font-size:12px}
+/* Novedad: carros despachados sin alistamiento */
+#appWrap .sicov-alerta{padding:10px 14px;border:1px solid var(--err);border-left-width:4px;border-radius:var(--r-md);background:var(--err-soft);color:var(--err)}
+#appWrap .sicov-alerta-titulo{font-weight:700;font-size:14px}
+#appWrap .sicov-alerta ul{margin:6px 0 0;padding-left:18px;display:grid;gap:3px;font-size:13px;color:var(--fg)}
+/* Placa, ruta, estado y km no se parten (la regla general de td corta en cualquier letra) */
+#appWrap #preopSicovTable td{overflow-wrap:normal;word-break:normal}
+#appWrap #preopSicovTable td:nth-child(-n+4),
+#appWrap #preopSicovTable td:nth-child(6),
+#appWrap #preopSicovTable td:nth-child(8){white-space:nowrap}
+
+/* =============== Botones, fichas y tablas planas (modo claro) =============== */
+html:not([data-theme="dark"]) .btn{box-shadow:none}
+html:not([data-theme="dark"]) .btn-primary{background:var(--brand);border-color:var(--brand)}
+html:not([data-theme="dark"]) .btn-primary:hover{background:var(--brand-strong);border-color:var(--brand-strong);box-shadow:none}
+html:not([data-theme="dark"]) .btn-success{background:var(--ok);border-color:var(--ok)}
+html:not([data-theme="dark"]) .btn-success:hover{background:#15803d;border-color:#15803d}
+html:not([data-theme="dark"]) .btn-danger{background:var(--err);border-color:var(--err)}
+html:not([data-theme="dark"]) .btn-danger:hover{background:#b91c1c;border-color:#b91c1c}
+html:not([data-theme="dark"]) .pill{box-shadow:none}
+html:not([data-theme="dark"]) .chip.active{background:var(--brand);box-shadow:none}
+html:not([data-theme="dark"]) #appWrap th{background:var(--bg-muted);box-shadow:inset 0 -1px 0 var(--line)}
+#appWrap th,
+#appWrap td{padding:8px 12px}
+#appWrap tbody tr:nth-child(even) td{background:rgba(15,23,42,.018)}
+html[data-theme="dark"] #appWrap tbody tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+
+/* Avisos flotantes apilados abajo a la derecha: jornada maxima, preoperacionales, documentos */
+#alertasFlotantes{
+  position:fixed;
+  right:16px;
+  bottom:16px;
+  z-index:9998;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  width:min(380px,calc(100vw - 32px));
+  max-height:calc(100vh - 32px);
+  overflow-y:auto;
+  pointer-events:none;
+}
+#alertasFlotantes:empty{display:none}
+#alertasFlotantes > *{pointer-events:auto;flex:none}
+#alertasFlotantes .fa-flotante{position:static;width:auto;max-height:45vh}
+#alertasFlotantes .fa-vencidos{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-top:8px;padding:7px 10px;border-radius:var(--r-sm);background:var(--err-soft);color:var(--err);font-size:12.5px}
+#alertasFlotantes #asisAlertaFlotante{order:1}
+#alertasFlotantes #preopAlertaFlotante{order:2}
+#alertasFlotantes #flotaAlertaFlotante{order:3}
+@media (max-width:860px){
+  #alertasFlotantes{left:12px;right:12px;bottom:12px;width:auto}
+}
+
+/* =============== Celular y tableta: menu desplegable =============== */
+@media (max-width:900px){
+  #appWrap.app-shell{grid-template-columns:minmax(0,1fr)}
+  #appWrap .sidebar{
+    position:fixed;
+    top:0;
+    bottom:0;
+    left:0;
+    width:min(86vw,300px);
+    transform:translateX(-102%);
+    transition:transform .22s ease;
+    box-shadow:0 10px 40px rgba(0,0,0,.35);
+  }
+  body.nav-abierto #appWrap .sidebar{transform:none}
+  #appWrap .sidebar-scrim{
+    display:block;
+    position:fixed;
+    inset:0;
+    z-index:29;
+    background:rgba(15,23,42,.5);
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .2s ease;
+  }
+  body.nav-abierto #appWrap .sidebar-scrim{opacity:1;pointer-events:auto}
+  body.nav-abierto{overflow:hidden}
+
+  #appWrap .nav-toggle{display:inline-flex}
+  #appWrap .topbar{flex-wrap:wrap;gap:8px 10px;padding:8px 12px}
+  #appWrap .page-title{font-size:16px}
+  #appWrap .topbar-actions{flex:1 1 100%;justify-content:flex-end;flex-wrap:wrap;gap:6px}
+  #appWrap .app-version{display:none}
+  #appWrap .user-chip{max-width:170px}
+  #appWrap .app-content{padding:12px}
+  #appWrap .tab-content.active{padding:12px;border-radius:10px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  #appWrap .sidebar,
+  #appWrap .sidebar-scrim{transition:none}
+}
+
+@media print{
+  #appWrap .sidebar,
+  #appWrap .sidebar-scrim,
+  #appWrap .topbar{display:none !important}
+  #appWrap.app-shell{display:block}
+  #appWrap .app-content{padding:0}
+  #appWrap .tab-content.active{border:0;box-shadow:none;padding:0}
+}

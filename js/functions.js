@@ -538,31 +538,23 @@ function fillDriverSelectOptions(selectEl, baseValue, preferredDriverId){
   }
 }
 
+// Alistamiento SICOV de hoy (dia Colombia) para el modal de despacho. Busca por interno; la
+// funcion lo cruza con la placa en flota_vehiculos.
 async function checkPreoperacionalForInterno(interno){
   const k = String(interno || "").trim();
   if (!k) return { found: false };
-  const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, "0");
-  const dd = String(today.getDate()).padStart(2, "0");
-  const fromIso = `${yyyy}-${mm}-${dd}T00:00:00`;
+  const hoy = fechaBogotaISO();
   try {
-    const { data, error } = await planillaSupabaseClient
-      .from(PREOP_SICOV_TABLE)
-      .select("FechaHora, NombreConductor, EstadoEnvio, Documento")
-      .eq("NumeroInterno", k)
-      .gte("FechaHora", fromIso)
-      .order("FechaHora", { ascending: false })
-      .limit(1);
+    const { data, error } = await planillaSupabaseClient.rpc(PREOP_SICOV_RPC, { p_desde: hoy, p_hasta: hoy, p_interno: k });
     if (error) throw error;
     const row = Array.isArray(data) && data.length ? data[0] : null;
     if (!row) return { found: false };
     return {
       found: true,
-      fecha: row.FechaHora,
-      conductor: row.NombreConductor || "",
-      documento: row.Documento || "",
-      estado: String(row.EstadoEnvio || "").toUpperCase()
+      fecha: row.registrado_en,
+      conductor: row.conductor_nombre || "",
+      estado: row.estado === "CON_NOVEDAD" ? "CON NOVEDAD" : "OK",
+      novedades: row.novedades || ""
     };
   } catch (err) {
     console.error("[preop check] fallo:", err);
@@ -585,14 +577,15 @@ function renderDispatchModalPreop(state){
   }
   if (!state.found) {
     dispatchModalPreop.classList.add("preop-missing");
-    dispatchModalPreop.textContent = "NO realizo preoperacional hoy";
+    dispatchModalPreop.textContent = "NO ha hecho el alistamiento SICOV hoy";
     return;
   }
-  const hora = state.fecha ? fechaHoraCO(state.fecha) : "-";
+  const hora = state.fecha ? horaCO(state.fecha) : "-";
   const partes = [`${state.estado || "OK"} · ${hora}`];
   if (state.conductor) partes.push(state.conductor);
-  dispatchModalPreop.classList.add("preop-ok");
-  dispatchModalPreop.textContent = `Realizado: ${partes.join(" · ")}`;
+  if (state.novedades) partes.push(state.novedades);
+  dispatchModalPreop.classList.add(state.estado === "CON NOVEDAD" ? "preop-error" : "preop-ok");
+  dispatchModalPreop.textContent = `Alistamiento realizado: ${partes.join(" · ")}`;
 }
 
 function openDispatchConfirmModal(payload = {}){
@@ -1809,99 +1802,285 @@ function handleDespachosAeropuertoChipClick(ev){
 }
 
 /* ===================== PREOPERACIONALES SICOV ===================== */
-const PREOP_SICOV_TABLE = "preoperacionales_sicov";
+// Alistamientos de la plataforma SICOV (tabla sicov_alistamientos, uno por placa y dia; repo
+// gesmovil-sicov). Se leen con la funcion panel_alistamientos_sicov, que no entrega cedulas
+// ni el autorreporte del conductor. La tabla vieja preoperacionales_sicov era el envio a
+// calisoftware y desde el 2026-10-08 casi no recibe registros.
+// Se trae todo el rango de fechas (maximo 2 meses); la busqueda y las paginas son locales.
+const PREOP_SICOV_RPC = "panel_alistamientos_sicov";
+let preopSicovRows = [];
+let preopSicovFlota700 = [];      // carros activos de la ruta 700, para saber cuales faltan
+let preopSicovRango = null;       // { desde, hasta } de la ultima consulta
 let preopSicovCurrentPage = 1;
-let preopSicovTotalCount = 0;
 let preopSicovLastLoadedAt = null;
 let preopSicovLoading = false;
 let preopSicovSearchTimer = null;
+let preopSicovDespachos = [];     // despachos del dia consultado (solo cuando es un dia)
+let preopSicovAlertaTimer = null;
+let preopSicovTrabajandoHoy = []; // carros despachados hoy sin alistamiento (ultima revision)
+const DESPACHO_CANCELACION_REAL_MIN = 30;
+const PREOP_ALERTA_POLL_MS = 5 * 60 * 1000;
+const PREOP_ALERTA_SNOOZE_MIN = 60;
+const PREOP_ALERTA_SNOOZE_LS = "combuses_preop_sicov_snooze";
 
 function getPreopSicovPageSize(){
   const n = parseInt(String(preopSicovPageSize?.value || "50"), 10);
   return Number.isFinite(n) && n > 0 ? n : 50;
 }
 
-function buildPreopSicovQuery(){
-  let q = planillaSupabaseClient
-    .from(PREOP_SICOV_TABLE)
-    .select("id, FechaHora, NumeroInterno, Placa, Documento, NombreConductor, EstadoEnvio, RespuestaSICOV, DetalleActividades, ErrorSheet", { count: "exact" })
-    .order("FechaHora", { ascending: false });
-
-  const from = String(preopSicovFrom?.value || "").trim();
-  const to = String(preopSicovTo?.value || "").trim();
-  if (from) q = q.gte("FechaHora", `${from}T00:00:00+00:00`);
-  if (to)   q = q.lte("FechaHora", `${to}T23:59:59+00:00`);
-
-  const term = String(preopSicovSearch?.value || "").trim();
-  if (term) {
-    const safe = term.replace(/[%,()]/g, " ").trim();
-    if (safe) {
-      q = q.or([
-        `NumeroInterno.ilike.%${safe}%`,
-        `Placa.ilike.%${safe}%`,
-        `Documento.ilike.%${safe}%`,
-        `NombreConductor.ilike.%${safe}%`
-      ].join(","));
-    }
-  }
-  return q;
+// Un despacho cuenta como trabajado si sigue ACTIVO o si se cancelo despues de 30 min: al
+// cerrar el dia el sistema pasa todos los activos a CANCELADO, asi que solo la cancelacion
+// en los primeros minutos es una cancelacion real.
+function despachoSalio(d){
+  if (String(d?.estado || "").toUpperCase() !== "CANCELADO") return true;
+  if (!d?.cancelled_at) return false;
+  const vida = (new Date(d.cancelled_at).getTime() - new Date(d.created_at).getTime()) / 60000;
+  return Number.isFinite(vida) && vida >= DESPACHO_CANCELACION_REAL_MIN;
 }
 
-async function loadPreoperacionalesSicov(targetPage){
+// Hora:minuto en Colombia, 24 h ("04:52"); horaCO trae segundos.
+function horaMinCO(value){
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "-" : d.toLocaleTimeString("es-CO", { timeZone: "America/Bogota", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+// Despachos de un dia colombiano (UTC-5 todo el ano), del primero al ultimo.
+function consultarDespachosDelDia(fechaISO){
+  const ini = new Date(`${fechaISO}T00:00:00-05:00`);
+  const fin = new Date(ini.getTime() + 86400000);
+  return fetchTodasLasFilas(() => planillaSupabaseClient.from(HISTORIAL_DESPACHOS_TABLE)
+    .select("interno, placa, estado, created_at, cancelled_at")
+    .gte("created_at", ini.toISOString())
+    .lt("created_at", fin.toISOString())
+    .order("created_at", { ascending: true }));
+}
+
+// Alistamientos del rango, carros activos de la ruta 700 y, si es un solo dia, sus despachos.
+async function consultarDatosSicov(desde, hasta){
+  const [alist, flota, despachos] = await Promise.all([
+    planillaSupabaseClient.rpc(PREOP_SICOV_RPC, { p_desde: desde, p_hasta: hasta }),
+    planillaSupabaseClient.from("flota_vehiculos").select("placa, interno, ruta, nombre_ruta, vinculado, operante")
+      .or(`ruta.eq.${FLOTA_ALERTA_RUTA_CODIGO},nombre_ruta.eq.${FLOTA_ALERTA_RUTA_NOMBRE}`),
+    desde === hasta ? consultarDespachosDelDia(desde) : Promise.resolve([]),
+  ]);
+  if (alist.error) throw alist.error;
+  if (flota.error) throw flota.error;
+  return {
+    alistamientos: Array.isArray(alist.data) ? alist.data : [],
+    flota700: (flota.data || []).filter(esVehiculoActivo).sort(compararPorInterno),
+    despachos: despachos || [],
+  };
+}
+
+// Carros activos de la ruta 700 sin alistamiento ese dia, separados en los que igual salieron
+// a trabajar (tienen despachos: es la novedad) y los que no.
+function calcularPendientesSicov(alistamientos, flota700, despachos){
+  const hechos = new Set(alistamientos.map(r => r.placa));
+  const trabajando = [], sinDespachos = [];
+  flota700.filter(v => !hechos.has(v.placa)).forEach(v => {
+    const interno = String(v.interno || "").replace(/^0+/, "");
+    const suyos = despachos.filter(d => despachoSalio(d)
+      && (d.placa === v.placa || (interno && String(d.interno || "").trim().replace(/^0+/, "") === interno)));
+    if (suyos.length) trabajando.push({ v, n: suyos.length, primero: suyos[0].created_at, ultimo: suyos[suyos.length - 1].created_at });
+    else sinDespachos.push(v);
+  });
+  return { trabajando, sinDespachos };
+}
+
+// Contador del menu y aviso flotante con los carros despachados hoy sin alistamiento.
+function setPreopSicovTabBadge(trabajando){
+  preopSicovTrabajandoHoy = trabajando;
+  const badge = document.getElementById("preopSicovTabBadge");
+  if (badge) {
+    badge.textContent = String(trabajando.length);
+    badge.title = trabajando.length ? `Despachados hoy sin alistamiento SICOV: ${trabajando.map(t => t.v.interno).join(", ")}` : "";
+    badge.style.display = trabajando.length ? "inline-block" : "none";
+  }
+  renderPreopAlertaFlotante();
+}
+
+// ----- Aviso flotante (abajo a la derecha, con el de jornada maxima y el de documentos) -----
+function preopAlertaPospuesta(claves){
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(PREOP_ALERTA_SNOOZE_LS) || "null"); } catch (_) {}
+  if (!s || !(Date.now() < s.hasta) || !Array.isArray(s.claves)) return false;
+  const vistas = new Set(s.claves);
+  return claves.every(k => vistas.has(k)); // un carro nuevo hace que el aviso vuelva a salir
+}
+
+function posponerPreopAlertaFlotante(){
+  const claves = preopSicovTrabajandoHoy.map(t => t.v.placa);
+  try {
+    localStorage.setItem(PREOP_ALERTA_SNOOZE_LS, JSON.stringify({ hasta: Date.now() + PREOP_ALERTA_SNOOZE_MIN * 60000, claves }));
+  } catch (_) {}
+  renderPreopAlertaFlotante();
+  showToast(`Aviso pospuesto ${PREOP_ALERTA_SNOOZE_MIN} min. Sale antes si otro carro se despacha sin alistamiento.`, "warn");
+}
+
+function renderPreopAlertaFlotante(){
+  const lista = preopSicovTrabajandoHoy;
+  let box = document.getElementById("preopAlertaFlotante");
+  // Dentro de la pestana ya se ve el aviso completo: no tapar la vista.
+  const ocultar = !currentUserId || !lista.length || getActiveTabId() === "preop-sicov"
+    || preopAlertaPospuesta(lista.map(t => t.v.placa));
+  if (ocultar) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "preopAlertaFlotante";
+    box.className = "fa-flotante";
+    box.setAttribute("role", "alert");
+    box.addEventListener("click", (ev) => {
+      const accion = ev.target.closest("[data-preop-accion]")?.getAttribute("data-preop-accion");
+      if (accion === "posponer") posponerPreopAlertaFlotante();
+      else if (accion === "abrir") document.querySelector('.tab[data-tab="preop-sicov"]')?.click();
+    });
+    contenedorAvisosFlotantes().appendChild(box);
+  }
+  const items = lista.slice(0, FLOTA_ALERTA_MAX_FLOTANTE).map(t => `
+    <li><button type="button" class="fa-item" data-preop-accion="abrir">
+      <span class="fa-item-int">${escapeHtml(t.v.interno || t.v.placa)}</span>
+      <span class="fa-item-doc">${escapeHtml(t.v.placa)} · ${t.n} ${t.n === 1 ? "despacho" : "despachos"}</span>
+      <span class="doc-dias doc-dias-vencido">desde ${escapeHtml(horaMinCO(t.primero))}</span>
+    </button></li>`).join("");
+  const mas = lista.length > FLOTA_ALERTA_MAX_FLOTANTE ? `<div class="fa-mas">y ${lista.length - FLOTA_ALERTA_MAX_FLOTANTE} más…</div>` : "";
+  box.innerHTML = `
+    <div class="fa-flotante-head">
+      <span>🚌 Preoperacionales SICOV</span>
+      <button type="button" class="fa-flotante-x" data-preop-accion="posponer" title="Posponer ${PREOP_ALERTA_SNOOZE_MIN} min" aria-label="Posponer aviso">✕</button>
+    </div>
+    <div class="fa-flotante-body">
+      <div class="fa-flotante-resumen">${lista.length === 1 ? "1 carro despachado" : `${lista.length} carros despachados`} hoy sin alistamiento</div>
+      <ul class="fa-lista">${items}</ul>
+      ${mas}
+      <div class="fa-flotante-acciones">
+        <button type="button" class="btn btn-ghost btn-sm" data-preop-accion="posponer">Posponer ${PREOP_ALERTA_SNOOZE_MIN} min</button>
+        <button type="button" class="btn btn-primary btn-sm" data-preop-accion="abrir">Abrir Preoperacionales</button>
+      </div>
+    </div>`;
+}
+
+// Vigilancia en segundo plano (desde el login, cada 5 min): el contador del menu y el aviso
+// flotante dicen cuantos carros de la ruta 700 estan despachando hoy sin alistamiento SICOV.
+async function revisarPendientesSicovHoy(){
+  if (!currentUserId) return;
+  const hoy = fechaBogotaISO();
+  try {
+    const datos = await consultarDatosSicov(hoy, hoy);
+    setPreopSicovTabBadge(calcularPendientesSicov(datos.alistamientos, datos.flota700, datos.despachos).trabajando);
+  } catch (err) {
+    console.warn("[sicov] revision de pendientes fallo:", err);
+  }
+}
+
+function ensurePreopSicovAlertaGlobal(){
+  if (preopSicovAlertaTimer) return;
+  revisarPendientesSicovHoy();
+  preopSicovAlertaTimer = setInterval(() => {
+    if (!document.hidden) revisarPendientesSicovHoy();
+  }, PREOP_ALERTA_POLL_MS);
+}
+
+function detenerPreopSicovAlertaGlobal(){
+  if (preopSicovAlertaTimer) { clearInterval(preopSicovAlertaTimer); preopSicovAlertaTimer = null; }
+  setPreopSicovTabBadge([]);
+}
+
+// Rango pedido en los filtros; sin fechas es hoy (Colombia). Nunca mas de 2 meses (la
+// funcion corta en 62 dias).
+function leerRangoPreopSicov(){
+  const hoy = fechaBogotaISO();
+  let desde = String(preopSicovFrom?.value || "").trim() || hoy;
+  let hasta = String(preopSicovTo?.value || "").trim() || desde;
+  if (desde > hasta) [desde, hasta] = [hasta, desde];
+  const limite = addMonthsISO(desde, 2);
+  if (hasta > limite) hasta = limite;
+  if (preopSicovFrom && preopSicovFrom.value !== desde) preopSicovFrom.value = desde;
+  if (preopSicovTo && preopSicovTo.value !== hasta) preopSicovTo.value = hasta;
+  return { desde, hasta };
+}
+
+async function loadPreoperacionalesSicov(){
   if (preopSicovLoading) return;
   preopSicovLoading = true;
-  const pageSize = getPreopSicovPageSize();
-  const page = Math.max(1, parseInt(targetPage || preopSicovCurrentPage || 1, 10));
-  preopSicovCurrentPage = page;
-  if (preopSicovStatus) preopSicovStatus.textContent = "Consultando Supabase...";
+  const rango = leerRangoPreopSicov();
+  if (preopSicovStatus) preopSicovStatus.textContent = "Consultando…";
   if (btnRefreshPreopSicov) btnRefreshPreopSicov.disabled = true;
   try {
-    const fromIdx = (page - 1) * pageSize;
-    const toIdx = fromIdx + pageSize - 1;
-    const { data, count, error } = await buildPreopSicovQuery().range(fromIdx, toIdx);
-    if (error) throw error;
-    preopSicovTotalCount = Number.isFinite(count) ? count : (Array.isArray(data) ? data.length : 0);
-    renderPreoperacionalesSicov(Array.isArray(data) ? data : []);
+    const datos = await consultarDatosSicov(rango.desde, rango.hasta);
+    preopSicovRows = datos.alistamientos;
+    preopSicovFlota700 = datos.flota700;
+    preopSicovDespachos = datos.despachos;
+    preopSicovRango = rango;
+    if (rango.desde === rango.hasta && rango.desde === fechaBogotaISO()) {
+      setPreopSicovTabBadge(calcularPendientesSicov(datos.alistamientos, datos.flota700, datos.despachos).trabajando);
+    }
+    preopSicovCurrentPage = 1;
     preopSicovLastLoadedAt = Date.now();
-    const stamp = horaCO(new Date());
-    if (preopSicovStatus) preopSicovStatus.textContent = `Actualizado ${stamp}`;
+    renderPreoperacionalesSicov();
+    if (preopSicovStatus) preopSicovStatus.textContent = `Actualizado ${horaCO(new Date())}`;
   } catch (err) {
-    console.error(`[${PREOP_SICOV_TABLE}] consulta fallo:`, err);
+    console.error(`[${PREOP_SICOV_RPC}] consulta fallo:`, err);
     if (preopSicovStatus) preopSicovStatus.textContent = `Error: ${err?.message || "fallo"}`;
-    showToast(`No se pudo cargar ${PREOP_SICOV_TABLE}: ${err?.message || "fallo"}`, "err");
+    showToast(`No se pudieron cargar los alistamientos SICOV: ${err?.message || "fallo"}`, "err");
   } finally {
     preopSicovLoading = false;
     if (btnRefreshPreopSicov) btnRefreshPreopSicov.disabled = false;
   }
 }
 
-function formatPreopSicovDate(iso){
-  if (!iso) return "-";
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return String(iso);
-    return fechaHoraCO(d);
-  } catch (_) { return String(iso); }
+function getPreopSicovFiltrados(){
+  const term = String(preopSicovSearch?.value || "").trim().toLowerCase();
+  if (!term) return preopSicovRows;
+  return preopSicovRows.filter(r => `${r.interno || ""} ${r.placa || ""} ${r.conductor_nombre || ""} ${r.ruta || ""}`.toLowerCase().includes(term));
 }
 
-function extractSicovIds(respuesta){
-  if (!respuesta) return { id: "", idAlistamiento: "" };
-  let obj = respuesta;
-  if (typeof respuesta === "string") {
-    try { obj = JSON.parse(respuesta); } catch (_) { return { id: "", idAlistamiento: "" }; }
+// Resumen arriba de la tabla. Con un solo dia dice cuantos carros de la ruta 700 lo hicieron
+// y cuales faltan; con un rango, cuantos alistamientos hubo.
+function renderPreopSicovResumen(){
+  const box = document.getElementById("preopSicovResumen");
+  if (!box || !preopSicovRango) return;
+  const { desde, hasta } = preopSicovRango;
+  const conNovedad = preopSicovRows.filter(r => r.estado === "CON_NOVEDAD").length;
+  const chipNovedad = `<span class="preop-pill ${conNovedad ? "preop-error" : "preop-ok"}">${conNovedad} con novedad</span>`;
+  if (desde !== hasta) {
+    const vehiculos = new Set(preopSicovRows.map(r => r.placa)).size;
+    box.innerHTML = `<div class="sicov-resumen-linea"><b class="sicov-cifra">${preopSicovRows.length}</b> alistamientos de <b>${vehiculos}</b> vehículos entre el ${flotaDocFmtFecha(desde)} y el ${flotaDocFmtFecha(hasta)} ${chipNovedad}</div>`;
+    return;
   }
-  const inner = obj?.sicovResponse || obj || {};
-  return {
-    id: String(inner?.id ?? ""),
-    idAlistamiento: String(inner?.idAlistamiento ?? "")
-  };
+  const { trabajando, sinDespachos } = calcularPendientesSicov(preopSicovRows, preopSicovFlota700, preopSicovDespachos);
+  const hechos700 = preopSicovFlota700.length - trabajando.length - sinDespachos.length;
+  const esHoy = desde === fechaBogotaISO();
+  // La novedad: carros que salieron a trabajar (tienen despachos) sin alistamiento.
+  const alertaHtml = trabajando.length ? `
+    <div class="sicov-alerta" role="alert">
+      <div class="sicov-alerta-titulo">⚠ ${trabajando.length === 1 ? "1 carro despachado" : `${trabajando.length} carros despachados`} ${esHoy ? "hoy " : ""}sin alistamiento SICOV</div>
+      <ul>${trabajando.map(t => `<li><b>${escapeHtml(t.v.interno || "-")}</b> ${escapeHtml(t.v.placa)} · ${t.n} ${t.n === 1 ? "despacho" : "despachos"}, el primero a las ${escapeHtml(horaMinCO(t.primero))}${t.n > 1 ? ` (último a las ${escapeHtml(horaMinCO(t.ultimo))})` : ""}</li>`).join("")}</ul>
+    </div>` : "";
+  let faltanHtml = "";
+  if (sinDespachos.length) {
+    faltanHtml = `<div class="sicov-faltan"><span class="muted">${esHoy ? "Faltan, sin despachos hoy" : "No lo hicieron (sin despachos)"}:</span> ${sinDespachos.map(v => `<span class="sicov-falta"><b>${escapeHtml(v.interno || "-")}</b> ${escapeHtml(v.placa)}</span>`).join("")}</div>`;
+  } else if (!trabajando.length) {
+    faltanHtml = `<div class="sicov-faltan"><span class="preop-pill preop-ok">Todos los carros activos de la ruta 700 tienen alistamiento</span></div>`;
+  }
+  box.innerHTML = `
+    <div class="sicov-resumen-linea">
+      <span>Ruta 700 · ${esHoy ? "hoy" : flotaDocFmtFecha(desde)}:</span>
+      <b class="sicov-cifra">${hechos700} de ${preopSicovFlota700.length}</b> <span>carros activos con alistamiento</span>
+      ${chipNovedad}
+      ${preopSicovRows.length !== hechos700 ? `<span class="muted">(${preopSicovRows.length} alistamientos en total)</span>` : ""}
+    </div>
+    ${alertaHtml}
+    ${faltanHtml}`;
 }
 
-function renderPreoperacionalesSicov(rows){
+function renderPreoperacionalesSicov(){
   if (!preopSicovBody) return;
+  renderPreopSicovResumen();
+  const filas = getPreopSicovFiltrados();
   const pageSize = getPreopSicovPageSize();
-  const totalPages = Math.max(1, Math.ceil(preopSicovTotalCount / pageSize));
-  if (preopSicovTotal) preopSicovTotal.textContent = String(preopSicovTotalCount);
+  const totalPages = Math.max(1, Math.ceil(filas.length / pageSize));
+  preopSicovCurrentPage = Math.min(Math.max(1, preopSicovCurrentPage), totalPages);
+  if (preopSicovTotal) preopSicovTotal.textContent = String(filas.length);
   if (preopSicovPage) preopSicovPage.textContent = String(preopSicovCurrentPage);
   if (preopSicovPages) preopSicovPages.textContent = String(totalPages);
   if (btnPreopSicovFirst) btnPreopSicovFirst.disabled = preopSicovCurrentPage <= 1;
@@ -1909,41 +2088,40 @@ function renderPreoperacionalesSicov(rows){
   if (btnPreopSicovNext)  btnPreopSicovNext.disabled  = preopSicovCurrentPage >= totalPages;
   if (btnPreopSicovLast)  btnPreopSicovLast.disabled  = preopSicovCurrentPage >= totalPages;
 
-  if (!rows.length) {
+  if (!filas.length) {
     preopSicovBody.innerHTML =
-      `<tr><td colspan="9" class="muted" style="text-align:center;padding:12px">Sin registros para los filtros aplicados.</td></tr>`;
+      `<tr><td colspan="8" class="muted" style="text-align:center;padding:12px">Sin alistamientos para los filtros aplicados.</td></tr>`;
     return;
   }
-
-  preopSicovBody.innerHTML = rows.map(row => {
-    const fecha = formatPreopSicovDate(row?.FechaHora);
-    const interno = String(row?.NumeroInterno || "-");
-    const placa = String(row?.Placa || "-");
-    const doc = String(row?.Documento || "-");
-    const cond = String(row?.NombreConductor || "-");
-    const estado = String(row?.EstadoEnvio || "-").toUpperCase();
-    const estadoColor = estado === "OK" ? "#065f46" : (estado === "ERROR" ? "#b91c1c" : "#64748b");
-    const det = String(row?.DetalleActividades || "");
-    const ids = extractSicovIds(row?.RespuestaSICOV);
-    const baseNum = getBaseNumForInterno(interno);
+  const inicio = (preopSicovCurrentPage - 1) * pageSize;
+  preopSicovBody.innerHTML = filas.slice(inicio, inicio + pageSize).map(r => {
+    const interno = String(r.interno || "-");
+    const baseNum = r.interno ? getBaseNumForInterno(interno) : "";
     const baseBadge = baseNum ? `<span class="chip-base" title="Base afiliacion">B${escapeHtml(baseNum)}</span> ` : "";
+    const novedad = r.estado === "CON_NOVEDAD";
+    const estadoHtml = `<span class="preop-pill ${novedad ? "preop-error" : "preop-ok"}">${novedad ? "Con novedad" : "OK"}</span>`;
+    const obs = [r.novedades, r.observaciones].filter(Boolean).join(" · ");
     return `<tr>
-      <td>${escapeHtml(fecha)}</td>
-      <td>${baseBadge}<strong style="color:#065f46">${escapeHtml(interno)}</strong></td>
-      <td>${escapeHtml(placa)}</td>
-      <td style="font-variant-numeric:tabular-nums">${escapeHtml(doc)}</td>
-      <td>${escapeHtml(cond)}</td>
-      <td><strong style="color:${estadoColor}">${escapeHtml(estado)}</strong></td>
-      <td style="font-variant-numeric:tabular-nums">${escapeHtml(ids.id || "-")}</td>
-      <td style="font-variant-numeric:tabular-nums">${escapeHtml(ids.idAlistamiento || "-")}</td>
-      <td><span class="muted" title="${escapeHtml(det)}">${escapeHtml(det.slice(0, 40))}${det.length > 40 ? "..." : ""}</span></td>
+      <td style="white-space:nowrap">${escapeHtml(flotaDocFmtFecha(r.fecha))}<br><span class="muted">${escapeHtml(horaMinCO(r.registrado_en))}</span></td>
+      <td>${baseBadge}<strong>${escapeHtml(interno)}</strong></td>
+      <td>${escapeHtml(r.placa || "-")}</td>
+      <td>${escapeHtml(r.ruta || "-")}</td>
+      <td>${escapeHtml(r.conductor_nombre || "-")}</td>
+      <td>${estadoHtml}</td>
+      <td>${obs ? escapeHtml(obs) : `<span class="muted">${r.actividades ? `${r.actividades} actividades conformes` : "-"}</span>`}</td>
+      <td style="font-variant-numeric:tabular-nums;text-align:right">${r.kilometraje != null ? escapeHtml(Number(r.kilometraje).toLocaleString("es-CO")) : "-"}</td>
     </tr>`;
   }).join("");
 }
 
+function irPaginaPreopSicov(pagina){
+  preopSicovCurrentPage = pagina;
+  renderPreoperacionalesSicov();
+}
+
 function schedulePreopSicovSearch(){
   if (preopSicovSearchTimer) clearTimeout(preopSicovSearchTimer);
-  preopSicovSearchTimer = setTimeout(() => { loadPreoperacionalesSicov(1); }, 350);
+  preopSicovSearchTimer = setTimeout(() => { preopSicovCurrentPage = 1; renderPreoperacionalesSicov(); }, 200);
 }
 
 /* ===================== MAPA VEHICULOS (llegadas_104 + realtime) ===================== */
@@ -4999,6 +5177,10 @@ function applyAuthState(session){
     }
     // Vigilancia global de jornada máxima (se superpone en toda la app).
     if (typeof ensureAsisAlertaGlobal === "function") ensureAsisAlertaGlobal();
+    // Vigilancia de documentos vencidos / por vencer de la ruta 700.
+    if (typeof ensureFlotaAlertasGlobal === "function") ensureFlotaAlertasGlobal();
+    // Carros de la ruta 700 despachando sin alistamiento SICOV (contador del menu).
+    if (typeof ensurePreopSicovAlertaGlobal === "function") ensurePreopSicovAlertaGlobal();
   }else{
     currentUserId = null;
     currentUserEmail = "";
@@ -5014,6 +5196,8 @@ function applyAuthState(session){
     if (asisAlertaGlobalTimer) { clearInterval(asisAlertaGlobalTimer); asisAlertaGlobalTimer = null; }
     const fb = document.getElementById("asisAlertaFlotante");
     if (fb) fb.remove();
+    if (typeof detenerFlotaAlertasGlobal === "function") detenerFlotaAlertasGlobal();
+    if (typeof detenerPreopSicovAlertaGlobal === "function") detenerPreopSicovAlertaGlobal();
   }
 }
 
@@ -8735,7 +8919,7 @@ document.querySelectorAll('.tab').forEach(tab => {
       }
     }
     if (tabId === 'conductores-csv') renderConductoresCsvTab();
-    if (tabId === 'preop-sicov' && !preopSicovLastLoadedAt) loadPreoperacionalesSicov();
+    if (tabId === 'preop-sicov' && (!preopSicovLastLoadedAt || Date.now() - preopSicovLastLoadedAt > 120000)) loadPreoperacionalesSicov();
     if (tabId === 'programacion-filas' && !programacionFilasLastLoadedAt) loadProgramacionFilas();
     if (tabId === 'vista-excel') refreshVistaExcel();
     if (tabId === 'cumplimiento') refreshCumplimiento();
@@ -8745,7 +8929,6 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tabId === 'auditoria-manual') loadAuditoriaManual();
     if (tabId === 'vuelos') { loadVuelos(); ensureVuelosPolling(); }
     if (tabId === 'asistencias') { loadAsistencias(); ensureAsisTick(); }
-    if (tabId === 'informe-flota') refreshInformeFlota();
     if (tabId === 'flota-documentos') loadFlotaDocumentos();
     if (tabId === 'conductor-documentos') loadConductorDocumentos();
     if (tabId === 'tabla-vehiculossonar' && !tablaVehiculosSonarLastLoadedAt) loadTablaVehiculosSonar();
@@ -8753,6 +8936,8 @@ document.querySelectorAll('.tab').forEach(tab => {
       setTimeout(() => { pushBiometricoSession(); }, 300);
       setTimeout(() => { pushBiometricoSession(); }, 1500);
     }
+    renderFlotaAlertaFlotante(); // se oculta dentro de Documentación Flota y reaparece al salir
+    renderPreopAlertaFlotante(); // igual, dentro de Preoperacionales SICOV
     refreshMobileTabSwitcher();
   });
 });
@@ -8794,33 +8979,9 @@ function bindUIEvents(){
   if (fdBody) fdBody.addEventListener("click", (ev) => {
     const btn = ev.target.closest("button[data-flotadoc-ver]");
     if (!btn) return;
-    abrirFlotaDocDetalle(btn.getAttribute("data-flotadoc-ver"));
+    abrirFlotaDocDetalle(btn.getAttribute("data-flotadoc-ver"), { focusTipo: btn.getAttribute("data-tipo") });
   });
-  const fdModalCerrar = document.getElementById("flotaDocModalCerrar");
-  if (fdModalCerrar) fdModalCerrar.addEventListener("click", () => document.getElementById("flotaDocModal")?.classList.add("hidden"));
-  const fdSections = document.getElementById("flotaDocModalSections");
-  if (fdSections) fdSections.addEventListener("click", (ev) => {
-    const subirBtn = ev.target.closest(".flota-doc-subir-btn");
-    if (subirBtn) {
-      const tipo = subirBtn.getAttribute("data-tipo");
-      const section = subirBtn.closest(".flota-doc-section");
-      const fileInput = section?.querySelector(".flota-doc-file-input");
-      const fechaInput = section?.querySelector(".flota-doc-fecha-input");
-      const file = fileInput?.files?.[0];
-      let fechaVencimiento = fechaInput?.value || null;
-      if (tipo === "MANTENIMIENTO_PREVENTIVO" && fechaVencimiento) fechaVencimiento = addMonthsISO(fechaVencimiento, 2);
-      if (flotaDocSelectedPlaca) subirFlotaDocumento(flotaDocSelectedPlaca, tipo, file, fechaVencimiento);
-      return;
-    }
-    const verBtn = ev.target.closest(".flota-doc-ver-btn");
-    if (verBtn) verArchivoFlotaDocumento(verBtn.getAttribute("data-path"));
-  });
-  if (fdSections) fdSections.addEventListener("change", (ev) => {
-    const fileInput = ev.target.closest(".flota-doc-file-input");
-    if (!fileInput) return;
-    const label = fileInput.closest(".doc-file-label")?.querySelector(".doc-file-label-text");
-    if (label) label.textContent = fileInput.files?.[0]?.name || "Elegir archivo…";
-  });
+  bindFlotaDocEvents();
 
   // Documentacion Conductores
   const cdRefresh = document.getElementById("btnRefreshConductorDoc");
@@ -9044,16 +9205,6 @@ function bindUIEvents(){
   const aSearch = document.getElementById("asisSearch");
   if (aSearch) aSearch.addEventListener("input", () => renderAsistencias());
 
-  // Informe de gestión de flota
-  const iflR = document.getElementById("iflRefresh");
-  if (iflR) iflR.addEventListener("click", () => loadInformeFlota());
-  const iflF = document.getElementById("iflFecha");
-  if (iflF) iflF.addEventListener("change", () => loadInformeFlota());
-  const iflH = document.getElementById("iflHoy");
-  if (iflH) iflH.addEventListener("click", () => { const f = document.getElementById("iflFecha"); if (f) f.value = fechaBogotaISO(); loadInformeFlota(); });
-  const iflD = document.getElementById("iflDownload");
-  if (iflD) iflD.addEventListener("click", () => downloadInformeFlota());
-
   if (btnFullscreenMapa) btnFullscreenMapa.addEventListener("click", () => toggleMapaFullscreen());
   document.addEventListener("fullscreenchange", handleMapaFullscreenChange);
   document.addEventListener("webkitfullscreenchange", handleMapaFullscreenChange);
@@ -9165,18 +9316,15 @@ function bindUIEvents(){
   if (vehiculosSonarBody) vehiculosSonarBody.addEventListener("click", handleVehiculosSonarTableClick);
 
   // Preoperacionales SICOV
-  if (btnRefreshPreopSicov) btnRefreshPreopSicov.addEventListener("click", () => loadPreoperacionalesSicov(1));
+  if (btnRefreshPreopSicov) btnRefreshPreopSicov.addEventListener("click", () => loadPreoperacionalesSicov());
   if (preopSicovSearch) preopSicovSearch.addEventListener("input", schedulePreopSicovSearch);
-  if (preopSicovFrom) preopSicovFrom.addEventListener("change", () => loadPreoperacionalesSicov(1));
-  if (preopSicovTo) preopSicovTo.addEventListener("change", () => loadPreoperacionalesSicov(1));
-  if (preopSicovPageSize) preopSicovPageSize.addEventListener("change", () => loadPreoperacionalesSicov(1));
-  if (btnPreopSicovFirst) btnPreopSicovFirst.addEventListener("click", () => loadPreoperacionalesSicov(1));
-  if (btnPreopSicovPrev)  btnPreopSicovPrev.addEventListener("click",  () => loadPreoperacionalesSicov(Math.max(1, preopSicovCurrentPage - 1)));
-  if (btnPreopSicovNext)  btnPreopSicovNext.addEventListener("click",  () => loadPreoperacionalesSicov(preopSicovCurrentPage + 1));
-  if (btnPreopSicovLast)  btnPreopSicovLast.addEventListener("click",  () => {
-    const totalPages = Math.max(1, Math.ceil(preopSicovTotalCount / getPreopSicovPageSize()));
-    loadPreoperacionalesSicov(totalPages);
-  });
+  if (preopSicovFrom) preopSicovFrom.addEventListener("change", () => loadPreoperacionalesSicov());
+  if (preopSicovTo) preopSicovTo.addEventListener("change", () => loadPreoperacionalesSicov());
+  if (preopSicovPageSize) preopSicovPageSize.addEventListener("change", () => irPaginaPreopSicov(1));
+  if (btnPreopSicovFirst) btnPreopSicovFirst.addEventListener("click", () => irPaginaPreopSicov(1));
+  if (btnPreopSicovPrev)  btnPreopSicovPrev.addEventListener("click",  () => irPaginaPreopSicov(preopSicovCurrentPage - 1));
+  if (btnPreopSicovNext)  btnPreopSicovNext.addEventListener("click",  () => irPaginaPreopSicov(preopSicovCurrentPage + 1));
+  if (btnPreopSicovLast)  btnPreopSicovLast.addEventListener("click",  () => irPaginaPreopSicov(Number.MAX_SAFE_INTEGER));
 
   // Programacion filas
   if (btnRefreshProgramacionFilas) btnRefreshProgramacionFilas.addEventListener("click", () => loadProgramacionFilas());
@@ -11296,6 +11444,18 @@ function asisVerCarroEnMapa(query){
 // ===== Alerta GLOBAL flotante (se superpone en toda la app, en cualquier pestaña) =====
 let asisAlertaGlobalTimer = null;
 
+// Contenedor comun de los avisos flotantes (jornada maxima, preoperacionales, documentos): se
+// apilan abajo a la derecha en vez de taparse entre si. El orden lo pone el CSS.
+function contenedorAvisosFlotantes(){
+  let c = document.getElementById("alertasFlotantes");
+  if (!c) {
+    c = document.createElement("div");
+    c.id = "alertasFlotantes";
+    document.body.appendChild(c);
+  }
+  return c;
+}
+
 // Persistencia del "posponer" (snooze): al cerrar un aviso NO se elimina, solo se
 // pospone 30 min. Se guarda en localStorage para sobrevivir recargas. Si el
 // conductor sigue pasado de horas, el aviso VUELVE a salir. La alerta refleja
@@ -11360,8 +11520,8 @@ function renderAsisAlertaFlotante(alertas, demo){
   if (!box) {
     box = document.createElement("div");
     box.id = "asisAlertaFlotante";
-    box.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:9999;width:min(380px,92vw);max-height:70vh;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.25);border-radius:12px";
-    document.body.appendChild(box);
+    box.style.cssText = "max-height:45vh;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.25);border-radius:12px";
+    contenedorAvisosFlotantes().appendChild(box);
   }
   const cards = alertas.map(({ a, diff }) => {
     const k = a.colaborador_id || a.colaboradores?.dni || a.colaboradores?.nombre || "";
@@ -11414,282 +11574,76 @@ function asisVerCarroEnMapa(query){
   setTimeout(() => { try { buscarCarroEnMapa(query); } catch (_) {} }, 400);
 }
 
-// ==================== INFORME DE GESTIÓN DE FLOTA ====================
-// Cruce por hora: llegadas del aeropuerto (Airplan) vs despachos realizados desde
-// el aeropuerto. Incluye modelo de demanda (pax estimados → buses necesarios).
-const IFL_OCUPACION = 0.82;   // ocupación media del vuelo
-const IFL_CAPTACION = 0.15;   // % de pax que toma nuestro servicio
-const IFL_PAX_BUS   = 19;     // capacidad útil por bus
-let iflRows = [];             // filas por hora ya calculadas
-let iflMeta = { fecha: "", vuelos: 0, asientos: 0, pax: 0, buses: 0, despachos: 0, paxTransp: 0 };
-let iflPuntos = [];           // desglose por punto de despacho
-
-// Itinerario_id → punto de despacho (alineado con las planillas que usa la operación).
-const IFL_PUNTO_POR_ITIN = {
-  "4505": "Almacentro",
-  "4504": "San Diego", "3395": "San Diego", "4507": "San Diego", "3385": "San Diego",
-  "4502": "Exposiciones", "3387": "Exposiciones", "3394": "Exposiciones", "4503": "Exposiciones", "4413": "Exposiciones",
-  "4501": "Terminal Norte",
-};
-function iflPuntoDeDespacho(d){
-  const id = String(d?.itinerario_id || "").trim();
-  if (IFL_PUNTO_POR_ITIN[id]) return IFL_PUNTO_POR_ITIN[id];
-  const n = String(d?.itinerario || "").toLowerCase();
-  if (n.includes("almacentro")) return "Almacentro";
-  if (n.includes("san diego") || n.includes("sandiego")) return "San Diego";
-  if (n.includes("exposicion") || n.includes("nutibara")) return "Exposiciones";
-  if (n.includes("terminalnorte") || n.includes("terminal norte")) return "Terminal Norte";
-  return "Otros";
-}
-
-function iflFechaSel(){
-  return String(document.getElementById("iflFecha")?.value || "").trim() || fechaBogotaISO();
-}
-
-// ¿El despacho fue CANCELADO DE VERDAD por el operador?
-// Ojo: al cerrar el día, el sistema pasa TODOS los despachos activos a CANCELADO
-// (con cancelled_at), así que en días pasados "CANCELADO" no significa que no salió.
-// La cancelación real se hace a los pocos minutos de crear el despacho; el cierre
-// de día cancela buses que ya llevaban horas trabajando. Regla: si vivió < 30 min
-// desde que se creó, fue cancelación real; si vivió más (o sigue ACTIVO), el bus salió.
-const IFL_VIDA_MIN_REAL = 30; // minutos: umbral cancelación real vs cierre de día
-function iflEstaCancelado(d){
-  if (String(d?.estado || "").toUpperCase() !== "CANCELADO") return false; // ACTIVO u otro → cuenta
-  if (!d?.cancelled_at) return true;
-  const vida = (new Date(d.cancelled_at).getTime() - new Date(d.created_at).getTime()) / 60000;
-  if (!Number.isFinite(vida)) return true;
-  return vida < IFL_VIDA_MIN_REAL; // vivió poco → cancelación real (excluir)
-}
-
-async function loadInformeFlota(){
-  const status = document.getElementById("iflStatus");
-  const fEl = document.getElementById("iflFecha");
-  if (fEl && !fEl.value) fEl.value = fechaBogotaISO();
-  const fecha = iflFechaSel();
-  if (status) status.textContent = `Consultando ${fecha}…`;
-  try {
-    // Rango UTC del día en hora Colombia (UTC-5): [fecha 05:00Z, fecha+1 05:00Z).
-    const startISO = `${fecha}T05:00:00+00:00`;
-    const finDia = new Date(new Date(`${fecha}T12:00:00-05:00`).getTime() + 24 * 3600 * 1000);
-    const endISO = `${finDia.toISOString().slice(0, 10)}T05:00:00+00:00`;
-
-    const [llegRes, despRes] = await Promise.all([
-      planillaSupabaseClient
-        .from("vuelos_mde_historico")
-        .select("hora,asientos,tipo,fecha")
-        .eq("fecha", fecha).eq("tipo", "llegada").limit(3000),
-      planillaSupabaseClient
-        .from(HISTORIAL_DESPACHOS_TABLE)
-        .select("itinerario_id,itinerario,pasajeros,estado,cancelled_at,created_at")
-        .gte("created_at", startISO).lt("created_at", endISO).limit(5000),
-    ]);
-    if (llegRes.error) throw llegRes.error;
-    if (despRes.error) throw despRes.error;
-
-    // Dedup visual de llegadas (Airplan a veces repite): por hora la contamos una vez.
-    const llegadas = Array.isArray(llegRes.data) ? llegRes.data : [];
-    // Todos los despachos reales del día (sin cancelaciones reales) → desglose por punto.
-    const despachosDia = (Array.isArray(despRes.data) ? despRes.data : [])
-      .filter(d => !iflEstaCancelado(d));
-    // Para el cruce con las llegadas contamos los despachos de SUBIDA (buses enviados
-    // al aeropuerto a atender los vuelos que llegan).
-    const despachos = despachosDia.filter(d => getItineraryDirection(d.itinerario, d.itinerario_id) === "sube");
-
-    // Desglose por punto de despacho (todos los despachos del día).
-    const puntoMap = new Map();
-    despachosDia.forEach(d => {
-      const p = iflPuntoDeDespacho(d);
-      if (!puntoMap.has(p)) puntoMap.set(p, { punto: p, despachos: 0, paxTransp: 0 });
-      const o = puntoMap.get(p);
-      o.despachos += 1;
-      o.paxTransp += Number(d.pasajeros) || 0;
-    });
-    const totalDespDia = despachosDia.length || 1;
-    iflPuntos = Array.from(puntoMap.values())
-      .map(o => ({ ...o, pct: Math.round(o.despachos / totalDespDia * 100) }))
-      .sort((a, b) => b.despachos - a.despachos);
-
-    // Acumular por hora (0..23).
-    const H = Array.from({ length: 24 }, (_, h) => ({
-      hora: h, vuelos: 0, asientos: 0, despachos: 0, paxTransp: 0,
-    }));
-    llegadas.forEach(v => {
-      const h = parseInt(String(v.hora || "").slice(0, 2), 10);
-      if (!(h >= 0 && h < 24)) return;
-      H[h].vuelos += 1;
-      H[h].asientos += Number(v.asientos) || 0;
-    });
-    despachos.forEach(d => {
-      const min = minutosDelDiaCO(d.created_at);
-      if (min == null) return;
-      const h = Math.floor(min / 60);
-      if (!(h >= 0 && h < 24)) return;
-      H[h].despachos += 1;
-      H[h].paxTransp += Number(d.pasajeros) || 0;
-    });
-
-    // Calcular demanda y quedarnos solo con horas que tengan actividad.
-    iflRows = H.map(r => {
-      const pax = Math.round(r.asientos * IFL_OCUPACION * IFL_CAPTACION);
-      const buses = Math.ceil(pax / IFL_PAX_BUS);
-      const cobertura = buses > 0 ? (r.despachos / buses) : null;
-      return { ...r, pax, buses, cobertura };
-    }).filter(r => r.vuelos > 0 || r.despachos > 0);
-
-    iflMeta = {
-      fecha,
-      vuelos: iflRows.reduce((s, r) => s + r.vuelos, 0),
-      asientos: iflRows.reduce((s, r) => s + r.asientos, 0),
-      pax: iflRows.reduce((s, r) => s + r.pax, 0),
-      buses: iflRows.reduce((s, r) => s + r.buses, 0),
-      despachos: iflRows.reduce((s, r) => s + r.despachos, 0),
-      paxTransp: iflRows.reduce((s, r) => s + r.paxTransp, 0),
-    };
-    renderInformeFlota();
-    if (status) status.textContent = `Actualizado ${horaCO(new Date())} · ${iflRows.length} franjas`;
-  } catch (err) {
-    console.error("[informe-flota] error:", err);
-    if (status) status.textContent = `Error: ${err?.message || "fallo"}`;
-    const body = document.getElementById("iflBody");
-    if (body) body.innerHTML = `<tr><td colspan="8" class="muted" style="text-align:center;padding:14px">No se pudo cargar. ${escapeHtml(err?.message || "")}</td></tr>`;
-  }
-}
-
-function iflCoberturaBadge(cob, despachos, buses){
-  if (buses === 0) {
-    return despachos > 0
-      ? `<span class="cump-badge cump-ok">Sin demanda (${despachos} desp.)</span>`
-      : `<span class="muted">—</span>`;
-  }
-  const pct = Math.round(cob * 100);
-  let cls = "cump-nolabor"; // rojo: cobertura baja
-  if (pct >= 100) cls = "cump-ok";
-  else if (pct >= 70) cls = "cump-incompleto"; // ámbar
-  return `<span class="cump-badge ${cls}">${pct}%</span>`;
-}
-
-function renderInformeFlotaPuntos(){
-  const body = document.getElementById("iflPuntoBody");
-  if (!body) return;
-  if (!iflPuntos.length) {
-    body.innerHTML = `<tr><td colspan="4" class="muted" style="text-align:center;padding:12px">Sin despachos para esta fecha.</td></tr>`;
-    return;
-  }
-  const totDesp = iflPuntos.reduce((s, p) => s + p.despachos, 0);
-  const totPax = iflPuntos.reduce((s, p) => s + p.paxTransp, 0);
-  body.innerHTML = iflPuntos.map(p => `<tr>
-    <td style="font-weight:700">${escapeHtml(p.punto)}</td>
-    <td style="text-align:center;font-weight:700;color:#1d4ed8">${p.despachos}</td>
-    <td style="text-align:center">${p.paxTransp || "—"}</td>
-    <td style="text-align:center">${p.pct}%</td>
-  </tr>`).join("") + `<tr style="background:#f1f5f9;font-weight:800">
-    <td>TOTAL</td>
-    <td style="text-align:center;color:#1d4ed8">${totDesp}</td>
-    <td style="text-align:center">${totPax}</td>
-    <td style="text-align:center">100%</td>
-  </tr>`;
-}
-
-function renderInformeFlota(){
-  const body = document.getElementById("iflBody");
-  const resumen = document.getElementById("iflResumen");
-  if (!body) return;
-  renderInformeFlotaPuntos();
-  if (!iflRows.length) {
-    body.innerHTML = `<tr><td colspan="8" class="muted" style="text-align:center;padding:14px">Sin llegadas ni despachos para esta fecha.</td></tr>`;
-    if (resumen) resumen.innerHTML = "";
-    return;
-  }
-  body.innerHTML = iflRows.map(r => {
-    const hh = `${String(r.hora).padStart(2, "0")}:00`;
-    return `<tr>
-      <td style="font-weight:700">${hh}</td>
-      <td style="text-align:center">${r.vuelos || "—"}</td>
-      <td style="text-align:center">${r.asientos || "—"}</td>
-      <td style="text-align:center">${r.pax || "—"}</td>
-      <td style="text-align:center;font-weight:700">${r.buses || "—"}</td>
-      <td style="text-align:center;font-weight:700;color:#1d4ed8">${r.despachos || "—"}</td>
-      <td style="text-align:center">${r.paxTransp || "—"}</td>
-      <td style="text-align:center">${iflCoberturaBadge(r.cobertura, r.despachos, r.buses)}</td>
-    </tr>`;
-  }).join("") + `<tr style="background:#f1f5f9;font-weight:800">
-      <td>TOTAL</td>
-      <td style="text-align:center">${iflMeta.vuelos}</td>
-      <td style="text-align:center">${iflMeta.asientos}</td>
-      <td style="text-align:center">${iflMeta.pax}</td>
-      <td style="text-align:center">${iflMeta.buses}</td>
-      <td style="text-align:center;color:#1d4ed8">${iflMeta.despachos}</td>
-      <td style="text-align:center">${iflMeta.paxTransp}</td>
-      <td style="text-align:center">${iflMeta.buses > 0 ? Math.round(iflMeta.despachos / iflMeta.buses * 100) + "%" : "—"}</td>
-    </tr>`;
-
-  if (resumen) {
-    const card = (t, v, c) => `<div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px 14px;min-width:120px">
-      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.4px">${t}</div>
-      <div style="font-weight:800;font-size:20px;color:${c || "#0f172a"}">${v}</div></div>`;
-    const covTotal = iflMeta.buses > 0 ? Math.round(iflMeta.despachos / iflMeta.buses * 100) : null;
-    resumen.innerHTML =
-      card("Vuelos llegada", iflMeta.vuelos) +
-      card("Pax estimados", iflMeta.pax) +
-      card("Buses necesarios", iflMeta.buses) +
-      card("Despachos", iflMeta.despachos, "#1d4ed8") +
-      card("Cobertura", covTotal == null ? "—" : covTotal + "%", covTotal == null ? "#0f172a" : (covTotal >= 100 ? "#047857" : covTotal >= 70 ? "#a16207" : "#b91c1c"));
-  }
-}
-
-function refreshInformeFlota(){
-  const fEl = document.getElementById("iflFecha");
-  if (fEl && !fEl.value) fEl.value = fechaBogotaISO();
-  loadInformeFlota();
-}
-
-function downloadInformeFlota(){
-  const table = document.getElementById("iflTabla");
-  const tablaPunto = document.getElementById("iflPuntoTabla");
-  if (!table || !iflRows.length) { if (typeof showToast === "function") showToast("No hay datos para exportar. Pulsa Actualizar.", "warn"); return; }
-  const html =
-    `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">` +
-    `<head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Informe Flota</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head>` +
-    `<body><h3>Informe de gestión de flota — ${escapeHtml(iflMeta.fecha)}</h3>${table.outerHTML}` +
-    `<h3>Despachos por punto de despacho</h3>${tablaPunto ? tablaPunto.outerHTML : ""}</body></html>`;
-  const blob = new Blob(["﻿", html], { type: "application/vnd.ms-excel" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `informe_flota_${iflMeta.fecha}.xls`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 // ==================== DOCUMENTACION FLOTA ====================
 const FLOTA_VEHICULOS_TABLE = "flota_vehiculos";
 const FLOTA_DOC_VIEW = "flota_documentos_estado";
 const FLOTA_DOC_TABLE = "flota_documentos";
 const FLOTA_DOC_BUCKET = "flota-documentos";
+// sinVencimiento: la Tarjeta de Propiedad (tipo LICENCIA_TRANSITO en la BD) no vence; la vista
+// la reporta siempre VIGENTE y sin fecha (migracion 20261005140000_tarjeta_propiedad_sin_vencimiento).
 const FLOTA_DOC_TIPOS = [
   { tipo: "SOAT", label: "SOAT" },
   { tipo: "TECNOMECANICA", label: "Tecnomecánica" },
   { tipo: "TARJETA_OPERACION", label: "Tarjeta de Operación" },
-  { tipo: "MANTENIMIENTO_PREVENTIVO", label: "Mantenimiento Preventivo", historial: true, preventivo: true },
   { tipo: "CERTIFICACION_AMPARO", label: "Certificación de Amparo" },
-  { tipo: "LICENCIA_TRANSITO", label: "Licencia de Tránsito" },
+  { tipo: "LICENCIA_TRANSITO", label: "Tarjeta de Propiedad", sinVencimiento: true },
+  { tipo: "MANTENIMIENTO_PREVENTIVO", label: "Mantenimiento Preventivo", historial: true, preventivo: true },
 ];
+// El mantenimiento preventivo no es un documento del vehiculo: se registra al final del detalle,
+// pero no sale en la tabla ni cuenta como vencido o por vencer (totales, filtros, alertas, badge).
+const FLOTA_DOC_TIPOS_DOCUMENTO = FLOTA_DOC_TIPOS.filter(t => !t.preventivo);
+const FLOTA_DOC_POR_VENCER_DIAS = 30; // mismo umbral que la vista flota_documentos_estado
+const FLOTA_DOC_MAX_MB = 15;
 
 let flotaVehiculosRows = [];
-let flotaDocEstadoRows = [];      // registro MAS RECIENTE por (placa, tipo)
+let flotaDocEstadoRows = [];      // registro vigente por (placa, tipo), segun la vista
 let flotaDocLastLoadedAt = null;
 let flotaDocSelectedPlaca = null;
+let flotaDocCargando = null;      // promesa de la carga en curso (evita cargas duplicadas)
+const flotaDocArchivosPendientes = new Map(); // tipo -> { file, previewUrl } elegido en el detalle
 
+// Suma meses sin desbordar: 31-jul + 2 meses = 30-sep (no 1-oct).
 function addMonthsISO(isoDate, months){
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoDate || ""));
   if (!m) return isoDate;
-  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  d.setUTCMonth(d.getUTCMonth() + months);
-  return d.toISOString().slice(0, 10);
+  const y = Number(m[1]), mes = Number(m[2]) - 1 + months, dia = Number(m[3]);
+  const ultimoDia = new Date(Date.UTC(y, mes + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, mes, Math.min(dia, ultimoDia))).toISOString().slice(0, 10);
 }
 
 function flotaDocFmtFecha(iso){
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
   return m ? `${m[3]}/${m[2]}/${m[1]}` : "-";
+}
+
+// Dias de calendario (Colombia) desde hoy hasta la fecha ISO; negativo = ya paso.
+function diasHastaISO(iso){
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+  const h = /^(\d{4})-(\d{2})-(\d{2})/.exec(fechaBogotaISO());
+  if (!m || !h) return null;
+  return Math.round((Date.UTC(+m[1], +m[2] - 1, +m[3]) - Date.UTC(+h[1], +h[2] - 1, +h[3])) / 86400000);
+}
+
+function textoDiasVencimiento(dias){
+  if (dias == null) return "";
+  if (dias < -1) return `Vencido hace ${-dias} días`;
+  if (dias === -1) return "Venció ayer";
+  if (dias === 0) return "Vence hoy";
+  if (dias === 1) return "Vence mañana";
+  return `Vence en ${dias} días`;
+}
+
+// Estado de un documento con la fecha de HOY en Colombia (la vista usa current_date del
+// servidor, que es UTC y cambia de dia a las 7 p. m.). Devuelve el mismo vocabulario de la
+// vista mas SIN_REGISTRO cuando el documento nunca se ha cargado.
+function estadoDocumento(row, tipoCfg){
+  if (!row) return { estado: "SIN_REGISTRO", dias: null };
+  if (tipoCfg?.sinVencimiento) return { estado: "VIGENTE", dias: null };
+  const dias = diasHastaISO(row.fecha_vencimiento);
+  if (dias == null) return { estado: row.estado_vencimiento === "VIGENTE" ? "VIGENTE" : "SIN_FECHA", dias: null };
+  if (dias < 0) return { estado: "VENCIDO", dias };
+  if (dias <= FLOTA_DOC_POR_VENCER_DIAS) return { estado: "POR_VENCER", dias };
+  return { estado: "VIGENTE", dias };
 }
 
 function getFlotaDocEstadoFor(placa, tipo){
@@ -11699,9 +11653,9 @@ function getFlotaDocEstadoFor(placa, tipo){
 function docFileTypeInfo(nombreOrPath){
   const clean = String(nombreOrPath || "").split("?")[0];
   const ext = (clean.includes(".") ? clean.split(".").pop() : "").toLowerCase();
-  if (ext === "pdf") return { cls: "doc-file-badge-pdf", label: "PDF" };
-  if (["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"].includes(ext)) return { cls: "doc-file-badge-img", label: "IMG" };
-  return { cls: "doc-file-badge-doc", label: ext ? ext.toUpperCase().slice(0, 4) : "ARCH" };
+  if (ext === "pdf") return { cls: "doc-file-badge-pdf", label: "PDF", kind: "pdf" };
+  if (["jpg", "jpeg", "png", "webp", "heic", "heif", "gif"].includes(ext)) return { cls: "doc-file-badge-img", label: "IMG", kind: "img" };
+  return { cls: "doc-file-badge-doc", label: ext ? ext.toUpperCase().slice(0, 4) : "ARCH", kind: "otro" };
 }
 
 function docFileBadgeHtml(nombreOrPath){
@@ -11709,22 +11663,46 @@ function docFileBadgeHtml(nombreOrPath){
   return `<span class="doc-file-badge ${info.cls}">${info.label}</span>`;
 }
 
-function flotaDocPillHtml(estadoRow){
+// opts.dosLineas: estado arriba y fecha abajo (tabla de flota, para que las columnas no se aprieten).
+function flotaDocPillHtml(estadoRow, tipoCfg, opts){
   if (!estadoRow) return `<span class="preop-pill preop-loading">Sin registro</span>`;
+  const { estado, dias } = estadoDocumento(estadoRow, tipoCfg);
   const map = {
     VENCIDO: ["preop-missing", "Vencido"],
     POR_VENCER: ["preop-error", "Por vencer"],
     VIGENTE: ["preop-ok", "Vigente"],
     SIN_FECHA: ["preop-loading", "Sin fecha"],
   };
-  const [cls, label] = map[estadoRow.estado_vencimiento] || ["preop-loading", "-"];
-  const fechaTxt = estadoRow.fecha_vencimiento ? flotaDocFmtFecha(estadoRow.fecha_vencimiento) : "";
+  let [cls, label] = map[estado] || ["preop-loading", "-"];
+  if (estado === "POR_VENCER" && dias <= FLOTA_ALERTA_URGENTE_DIAS) cls += " doc-pill-urgente";
+  const fechaTxt = (!tipoCfg?.sinVencimiento && estadoRow.fecha_vencimiento) ? flotaDocFmtFecha(estadoRow.fecha_vencimiento) : "";
   const archivoIcon = estadoRow.storage_path ? `<span title="Tiene archivo cargado">📎</span> ` : "";
-  return `<span class="preop-pill ${cls}">${archivoIcon}${label}${fechaTxt ? " · " + fechaTxt : ""}</span>`;
+  const tip = textoDiasVencimiento(dias);
+  const titleAttr = tip ? ` title="${escapeHtml(tip)}"` : "";
+  if (opts?.dosLineas) {
+    return `<span class="preop-pill doc-pill-2l ${cls}"${titleAttr}><span>${archivoIcon}${label}</span>${fechaTxt ? `<small>${fechaTxt}</small>` : ""}</span>`;
+  }
+  return `<span class="preop-pill ${cls}"${titleAttr}>${archivoIcon}${label}${fechaTxt ? " · " + fechaTxt : ""}</span>`;
+}
+
+// PostgREST corta cada respuesta en max_rows (1000): se pide por paginas hasta agotar.
+async function fetchTodasLasFilas(construirConsulta, tamPagina = 1000){
+  const filas = [];
+  for (let desde = 0; ; desde += tamPagina) {
+    const { data, error } = await construirConsulta().range(desde, desde + tamPagina - 1);
+    if (error) throw error;
+    const pagina = Array.isArray(data) ? data : [];
+    filas.push(...pagina);
+    if (pagina.length < tamPagina) return filas;
+  }
 }
 
 async function loadFlotaDocumentos(opts){
   const force = !!(opts && opts.force);
+  if (flotaDocCargando) {
+    await flotaDocCargando.catch(() => {});
+    if (!force) return;
+  }
   if (!force && flotaDocLastLoadedAt && (Date.now() - flotaDocLastLoadedAt) < 30000) {
     renderFlotaDocumentosTab();
     return;
@@ -11733,24 +11711,28 @@ async function loadFlotaDocumentos(opts){
   const btn = document.getElementById("btnRefreshFlotaDoc");
   if (statusEl) statusEl.textContent = "Cargando...";
   if (btn) btn.disabled = true;
-  try {
-    const [{ data: vehData, error: vehErr }, { data: docData, error: docErr }] = await Promise.all([
-      planillaSupabaseClient.from(FLOTA_VEHICULOS_TABLE).select("*").order("placa", { ascending: true }),
-      planillaSupabaseClient.from(FLOTA_DOC_VIEW).select("*"),
+  flotaDocCargando = (async () => {
+    const [vehData, docData] = await Promise.all([
+      fetchTodasLasFilas(() => planillaSupabaseClient.from(FLOTA_VEHICULOS_TABLE).select("*").order("placa", { ascending: true })),
+      fetchTodasLasFilas(() => planillaSupabaseClient.from(FLOTA_DOC_VIEW).select("*").order("placa", { ascending: true }).order("tipo", { ascending: true })),
     ]);
-    if (vehErr) throw vehErr;
-    if (docErr) throw docErr;
-    flotaVehiculosRows = Array.isArray(vehData) ? vehData : [];
-    flotaDocEstadoRows = Array.isArray(docData) ? docData : [];
+    flotaVehiculosRows = vehData;
+    flotaDocEstadoRows = docData;
     flotaDocLastLoadedAt = Date.now();
+  })();
+  try {
+    await flotaDocCargando;
     populateFlotaDocRutaFilter();
     renderFlotaDocumentosTab();
+    flotaAvisoDocs = calcularAvisoDocumentos(flotaVehiculosRows, flotaDocEstadoRows);
+    actualizarFlotaAlertas(flotaVehiculosRows, flotaDocEstadoRows);
     if (statusEl) statusEl.textContent = `Actualizado: ${horaCO(new Date())} · ${flotaVehiculosRows.length} vehículos`;
   } catch (err) {
     console.error("[flota-doc] carga fallo:", err);
     if (statusEl) statusEl.textContent = `Error: ${err?.message || "fallo"}`;
     if (typeof showToast === "function") showToast(`No se pudo cargar documentación de flota: ${err?.message || "fallo"}`, "err");
   } finally {
+    flotaDocCargando = null;
     if (btn) btn.disabled = false;
   }
 }
@@ -11779,11 +11761,11 @@ function getFlotaDocFiltered(){
       if (!hay.includes(term)) return false;
     }
     if (estadoFilter) {
-      const anyMatch = FLOTA_DOC_TIPOS.some(t => getFlotaDocEstadoFor(v.placa, t.tipo)?.estado_vencimiento === estadoFilter);
+      const anyMatch = FLOTA_DOC_TIPOS_DOCUMENTO.some(t => estadoDocumento(getFlotaDocEstadoFor(v.placa, t.tipo), t).estado === estadoFilter);
       if (!anyMatch) return false;
     }
     if (archivoFilter) {
-      const tieneAlgunArchivo = FLOTA_DOC_TIPOS.some(t => getFlotaDocEstadoFor(v.placa, t.tipo)?.storage_path);
+      const tieneAlgunArchivo = FLOTA_DOC_TIPOS_DOCUMENTO.some(t => getFlotaDocEstadoFor(v.placa, t.tipo)?.storage_path);
       if (archivoFilter === "CON_ARCHIVO" && !tieneAlgunArchivo) return false;
       if (archivoFilter === "SIN_ARCHIVO" && tieneAlgunArchivo) return false;
     }
@@ -11792,10 +11774,16 @@ function getFlotaDocFiltered(){
   });
 }
 
+// El badge de la pestaña cuenta solo los documentos de la ruta 700 vencidos o por vencer
+// (lo alimenta el modulo de alertas, que corre en segundo plano desde el login).
 function setFlotaDocTabBadge(n){
   const badge = document.getElementById("flotaDocTabBadge");
   if (!badge) return;
-  if (n > 0) { badge.textContent = String(n); badge.style.display = "inline-block"; }
+  if (n > 0) {
+    badge.textContent = String(n);
+    badge.title = `Ruta 700: ${n} documento(s) vencido(s) o por vencer`;
+    badge.style.display = "inline-block";
+  }
   else { badge.style.display = "none"; }
 }
 
@@ -11808,24 +11796,23 @@ function renderFlotaDocumentosTab(){
 
   let vencidosTotal = 0, porVencerTotal = 0;
   flotaVehiculosRows.forEach(v => {
-    FLOTA_DOC_TIPOS.forEach(t => {
-      const estado = getFlotaDocEstadoFor(v.placa, t.tipo)?.estado_vencimiento;
+    FLOTA_DOC_TIPOS_DOCUMENTO.forEach(t => {
+      const { estado } = estadoDocumento(getFlotaDocEstadoFor(v.placa, t.tipo), t);
       if (estado === "VENCIDO") vencidosTotal++;
       else if (estado === "POR_VENCER") porVencerTotal++;
     });
   });
   const rv = document.getElementById("flotaDocResumenVencidos");
-  if (rv) rv.textContent = `Vencidos: ${vencidosTotal}`;
+  if (rv) rv.textContent = `Toda la flota · vencidos: ${vencidosTotal}`;
   const rp = document.getElementById("flotaDocResumenPorVencer");
-  if (rp) rp.textContent = `Por vencer: ${porVencerTotal}`;
-  setFlotaDocTabBadge(vencidosTotal + porVencerTotal);
+  if (rp) rp.textContent = `Toda la flota · por vencer: ${porVencerTotal}`;
 
   if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="11" class="muted" style="text-align:center;padding:12px">Sin vehículos para los filtros.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="10" class="muted" style="text-align:center;padding:12px">Sin vehículos para los filtros.</td></tr>`;
     return;
   }
   body.innerHTML = filtered.map(v => {
-    const cells = FLOTA_DOC_TIPOS.map(t => `<td>${flotaDocPillHtml(getFlotaDocEstadoFor(v.placa, t.tipo))}</td>`).join("");
+    const cells = FLOTA_DOC_TIPOS_DOCUMENTO.map(t => `<td><button type="button" class="doc-pill-btn" data-flotadoc-ver="${escapeHtml(v.placa)}" data-tipo="${t.tipo}" title="Ver o actualizar ${escapeHtml(t.label)}">${flotaDocPillHtml(getFlotaDocEstadoFor(v.placa, t.tipo), t, { dosLineas: true })}</button></td>`).join("");
     return `<tr>
       <td>${escapeHtml(v.placa || "-")}</td>
       <td>${escapeHtml(v.interno || "-")}</td>
@@ -11837,102 +11824,281 @@ function renderFlotaDocumentosTab(){
   }).join("");
 }
 
+function getFlotaVehiculo(placa){
+  return flotaVehiculosRows.find(v => v.placa === placa) || flotaAlertaVehiculos.find(v => v.placa === placa) || null;
+}
+
+function claseDiasVencimiento(estado, dias){
+  if (estado === "VENCIDO") return "doc-dias-vencido";
+  if (estado === "POR_VENCER") return dias <= FLOTA_ALERTA_URGENTE_DIAS ? "doc-dias-urgente" : "doc-dias-por-vencer";
+  return "doc-dias-ok";
+}
+
 function renderFlotaDocSectionHtml(tipoCfg, placa){
-  const estado = getFlotaDocEstadoFor(placa, tipoCfg.tipo);
+  const t = tipoCfg.tipo;
+  const estado = getFlotaDocEstadoFor(placa, t);
+  const { estado: nivel, dias } = estadoDocumento(estado, tipoCfg);
   const nombreArchivo = estado?.nombre_archivo_original || "Documento actual";
-  const currentHtml = estado?.storage_path
-    ? `<div class="doc-file-chip">
+
+  let archivoHtml;
+  if (estado?.storage_path) {
+    archivoHtml = `<div class="doc-file-chip">
         ${docFileBadgeHtml(estado.nombre_archivo_original || estado.storage_path)}
         <span class="doc-file-name" title="${escapeHtml(nombreArchivo)}">${escapeHtml(nombreArchivo)}</span>
-        <button type="button" class="btn btn-ghost btn-sm flota-doc-ver-btn" data-path="${escapeHtml(estado.storage_path)}">Ver</button>
-      </div>`
-    : `<div class="doc-file-empty">Sin documento cargado todavía</div>`;
+        <button type="button" class="btn btn-ghost btn-sm flota-doc-ver-btn" data-path="${escapeHtml(estado.storage_path)}" data-nombre="${escapeHtml(estado.nombre_archivo_original || "")}" data-tipo="${t}">👁 Ver</button>
+      </div>`;
+  } else if (estado) {
+    archivoHtml = `<div class="doc-file-empty">Registro sin archivo adjunto${estado.nombre_archivo_original ? ` · ${escapeHtml(estado.nombre_archivo_original)}` : ""}</div>`;
+  } else {
+    archivoHtml = `<div class="doc-file-empty">Sin documento cargado todavía</div>`;
+  }
+
+  let fechaHtml = "";
+  if (estado && tipoCfg.sinVencimiento) {
+    fechaHtml = `<div class="doc-fecha-row"><span>No vence: siempre queda vigente la última que se sube.</span></div>`;
+  } else if (estado) {
+    const diasTxt = textoDiasVencimiento(dias);
+    fechaHtml = `
+      <div class="doc-fecha-row">
+        <span>${tipoCfg.preventivo ? "Próxima preventiva" : "Vence"}: <b>${flotaDocFmtFecha(estado.fecha_vencimiento)}</b></span>
+        ${diasTxt ? `<span class="doc-dias ${claseDiasVencimiento(nivel, dias)}">${diasTxt}</span>` : ""}
+        ${estado.id ? `<button type="button" class="doc-link-btn doc-fecha-edit-btn" data-tipo="${t}">✎ Corregir fecha</button>` : ""}
+      </div>
+      <div class="doc-fecha-edit hidden" data-tipo="${t}">
+        <input type="date" class="doc-fecha-edit-input" value="${escapeHtml(estado.fecha_vencimiento || "")}" />
+        <button type="button" class="btn btn-primary btn-sm doc-fecha-save-btn" data-tipo="${t}" data-id="${escapeHtml(estado.id || "")}">Guardar fecha</button>
+        <button type="button" class="btn btn-ghost btn-sm doc-fecha-cancel-btn" data-tipo="${t}">Cancelar</button>
+        <span class="muted">Cambia solo la fecha del documento vigente, sin subir archivo nuevo.</span>
+      </div>`;
+  }
+
+  const fechaInput = tipoCfg.sinVencimiento ? "" : `
+        <label class="doc-field">${tipoCfg.preventivo ? "Fecha en que se hizo" : "Vence el"}
+          <input type="date" class="flota-doc-fecha-input" data-tipo="${t}"${tipoCfg.preventivo ? ` max="${fechaBogotaISO()}"` : ""} />
+        </label>
+        ${tipoCfg.preventivo ? `<span class="doc-calc muted" data-tipo="${t}">Próxima preventiva: —</span>` : ""}`;
+
   return `
-    <div class="doc-card flota-doc-section" data-tipo="${tipoCfg.tipo}">
+    <div class="doc-card flota-doc-section" data-tipo="${t}">
       <div class="doc-card-head">
         <div class="doc-card-title"><span class="doc-type-icon">📄</span><strong>${escapeHtml(tipoCfg.label)}</strong></div>
-        ${flotaDocPillHtml(estado)}
+        ${flotaDocPillHtml(estado, tipoCfg)}
       </div>
-      ${currentHtml}
-      <div class="doc-card-upload">
-        <label class="doc-file-label">
-          <input type="file" class="flota-doc-file-input" data-tipo="${tipoCfg.tipo}" accept=".pdf,image/*" />
-          <span class="doc-file-label-icon">📎</span>
-          <span class="doc-file-label-text">Elegir archivo…</span>
+      ${archivoHtml}
+      ${fechaHtml}
+      <div class="doc-update">
+        <div class="doc-update-title">${estado ? "Actualizar documento" : "Cargar documento"}</div>
+        <label class="doc-dropzone" data-tipo="${t}">
+          <input type="file" class="flota-doc-file-input" data-tipo="${t}" accept=".pdf,image/*" />
+          <span class="doc-dropzone-icon">📎</span>
+          <span><b>Arrastra el archivo aquí</b> o toca para elegirlo<br><small>PDF o foto · máximo ${FLOTA_DOC_MAX_MB} MB</small></span>
         </label>
-        <input type="date" class="flota-doc-fecha-input" data-tipo="${tipoCfg.tipo}" title="${tipoCfg.preventivo ? "Fecha en que se realizó el mantenimiento" : "Fecha de vencimiento"}" />
-        <button type="button" class="btn btn-primary btn-sm flota-doc-subir-btn" data-tipo="${tipoCfg.tipo}">Subir</button>
+        <div class="doc-picked hidden" data-tipo="${t}"></div>
+        <div class="doc-update-row">
+          ${fechaInput}
+          <button type="button" class="btn btn-primary btn-sm flota-doc-subir-btn" data-tipo="${t}">Guardar documento</button>
+        </div>
+        ${tipoCfg.preventivo ? `<div class="muted" style="margin-top:6px;font-size:12px">La próxima preventiva se calcula sola: fecha en que se hizo + 2 meses.</div>` : ""}
       </div>
-      ${tipoCfg.preventivo ? `<div class="muted" style="margin-top:6px">Ingresa la fecha en que se hizo el mantenimiento; el próximo vencimiento se calcula automáticamente (+2 meses).</div>` : ""}
       <details class="doc-historial">
-        <summary>Historial de cambios${tipoCfg.historial ? (tipoCfg.preventivo ? " · cada 2 meses (Res. 315/2013)" : " · revisión cada 2 meses") : ""}</summary>
-        <div class="flota-doc-historial-body" data-tipo="${tipoCfg.tipo}">Cargando historial…</div>
+        <summary>Historial <span class="doc-hist-count" data-tipo="${t}"></span>${tipoCfg.preventivo ? " · cada 2 meses (Res. 315/2013)" : ""}</summary>
+        <div class="flota-doc-historial-body" data-tipo="${t}">Cargando historial…</div>
       </details>
     </div>`;
 }
 
-async function abrirFlotaDocDetalle(placa){
-  const veh = flotaVehiculosRows.find(v => v.placa === placa);
+async function abrirFlotaDocDetalle(placa, opts){
+  if (!flotaDocLastLoadedAt) await loadFlotaDocumentos();
+  const veh = getFlotaVehiculo(placa);
   if (!veh) return;
   flotaDocSelectedPlaca = placa;
+  limpiarArchivosPendientesFlota();
   const modal = document.getElementById("flotaDocModal");
   const title = document.getElementById("flotaDocModalTitle");
   const sub = document.getElementById("flotaDocModalSub");
   const sections = document.getElementById("flotaDocModalSections");
   if (!modal || !sections) return;
   if (title) title.textContent = `Documentación · ${veh.placa}`;
-  if (sub) sub.textContent = `Interno ${veh.interno || "-"} · ${veh.marca || ""} ${veh.modelo || ""}`.trim();
+  const ruta = getFlotaDocRutaLabel(veh);
+  if (sub) sub.textContent = [`Interno ${veh.interno || "-"}`, `${veh.marca || ""} ${veh.modelo || ""}`.trim(), ruta ? `Ruta ${ruta}` : ""].filter(Boolean).join(" · ");
   sections.innerHTML = FLOTA_DOC_TIPOS.map(t => renderFlotaDocSectionHtml(t, veh.placa)).join("");
   modal.classList.remove("hidden");
+  const focusTipo = opts?.focusTipo;
+  const sec = focusTipo ? sections.querySelector(`.flota-doc-section[data-tipo="${focusTipo}"]`) : null;
+  if (sec) {
+    sec.classList.add("doc-card-focus");
+    sec.scrollIntoView({ block: "center" });
+    setTimeout(() => sec.classList.remove("doc-card-focus"), 2500);
+  } else {
+    sections.scrollTop = 0;
+  }
   await Promise.all(FLOTA_DOC_TIPOS.map(t => cargarHistorialTipo(placa, t.tipo)));
 }
 
+function cerrarFlotaDocDetalle(){
+  document.getElementById("flotaDocModal")?.classList.add("hidden");
+  limpiarArchivosPendientesFlota();
+  flotaDocSelectedPlaca = null;
+}
+
 async function cargarHistorialTipo(placa, tipo){
-  const body = document.querySelector(`.flota-doc-historial-body[data-tipo="${tipo}"]`);
+  const selector = `#flotaDocModalSections .flota-doc-historial-body[data-tipo="${tipo}"]`;
+  let body = document.querySelector(selector);
   if (!body) return;
   body.innerHTML = "Cargando historial…";
   try {
-    const { data, error } = await planillaSupabaseClient
+    const columnas = "id, fecha_vencimiento, storage_path, nombre_archivo_original, created_at";
+    const consulta = (cols) => planillaSupabaseClient
       .from(FLOTA_DOC_TABLE)
-      .select("id, fecha_vencimiento, storage_path, nombre_archivo_original, created_at")
+      .select(cols)
       .eq("placa", placa)
       .eq("tipo", tipo)
-      .order("fecha_vencimiento", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false });
+    let { data, error } = await consulta(`${columnas}, rechazado, subido_por_conductor`);
+    if (error) ({ data, error } = await consulta(columnas)); // BD sin las columnas de revision de fotos
     if (error) throw error;
+    if (flotaDocSelectedPlaca !== placa) return; // ya se abrio otro vehiculo
+    body = document.querySelector(selector);
+    if (!body) return;
     const rows = Array.isArray(data) ? data : [];
+    const countEl = document.querySelector(`#flotaDocModalSections .doc-hist-count[data-tipo="${tipo}"]`);
+    if (countEl) countEl.textContent = rows.length ? `(${rows.length})` : "";
     if (!rows.length) {
       body.innerHTML = `<div class="muted">Sin registros todavía.</div>`;
       return;
     }
-    body.innerHTML = `<div class="doc-historial-table" style="max-height:180px;overflow:auto"><table class="ent-tabla" style="width:100%">
-      <thead><tr><th></th><th>Vencimiento</th><th>Cargado</th><th></th></tr></thead>
+    const tipoCfg = FLOTA_DOC_TIPOS.find(x => x.tipo === tipo);
+    const vigenteId = getFlotaDocEstadoFor(placa, tipo)?.id;
+    body.innerHTML = `<div class="doc-historial-table" style="max-height:200px;overflow:auto"><table class="ent-tabla" style="width:100%">
+      <thead><tr><th></th><th>${tipoCfg?.preventivo ? "Próxima" : "Vence"}</th><th>Cargado</th><th></th></tr></thead>
       <tbody>
-        ${rows.map(r => `
+        ${rows.map(r => {
+          const tags = [
+            r.id === vigenteId ? `<span class="doc-hist-tag doc-hist-tag-actual">Vigente</span>` : "",
+            r.rechazado ? `<span class="doc-hist-tag doc-hist-tag-rech">Rechazado</span>` : "",
+            r.subido_por_conductor ? `<span class="doc-hist-tag doc-hist-tag-cond">Enviado por conductor</span>` : "",
+          ].join("");
+          return `
           <tr>
             <td>${docFileBadgeHtml(r.nombre_archivo_original || r.storage_path)}</td>
-            <td>${flotaDocFmtFecha(r.fecha_vencimiento)}</td>
+            <td>${tipoCfg?.sinVencimiento ? "—" : flotaDocFmtFecha(r.fecha_vencimiento)}${tags}</td>
             <td>${fechaHoraCO(r.created_at)}</td>
-            <td>${r.storage_path ? `<button type="button" class="btn btn-ghost btn-sm flota-doc-ver-btn" data-path="${escapeHtml(r.storage_path)}">Ver</button>` : "-"}</td>
-          </tr>`).join("")}
+            <td>${r.storage_path ? `<button type="button" class="btn btn-ghost btn-sm flota-doc-ver-btn" data-path="${escapeHtml(r.storage_path)}" data-nombre="${escapeHtml(r.nombre_archivo_original || "")}" data-tipo="${tipo}">👁 Ver</button>` : "-"}</td>
+          </tr>`;
+        }).join("")}
       </tbody>
     </table></div>`;
   } catch (err) {
     console.error(`[flota-doc] historial ${tipo} fallo:`, err);
-    body.innerHTML = `<div class="muted">Error cargando historial.</div>`;
+    if (flotaDocSelectedPlaca === placa) body.innerHTML = `<div class="muted">Error cargando historial.</div>`;
   }
 }
 
+function formatoTamanoArchivo(bytes){
+  if (!Number.isFinite(bytes)) return "";
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace(".", ",")} MB`;
+}
+
+function validarArchivoDocumento(file){
+  if (!file) return "Elige o arrastra el archivo del documento.";
+  const nombre = String(file.name || "");
+  const esPdf = file.type === "application/pdf" || /\.pdf$/i.test(nombre);
+  const esImagen = String(file.type || "").startsWith("image/") || /\.(jpe?g|png|webp|heic|heif|gif)$/i.test(nombre);
+  if (!esPdf && !esImagen) return "Solo se aceptan PDF o fotos (JPG, PNG…).";
+  if (file.size > FLOTA_DOC_MAX_MB * 1024 * 1024) return `El archivo pesa ${formatoTamanoArchivo(file.size)}; el máximo es ${FLOTA_DOC_MAX_MB} MB.`;
+  return "";
+}
+
+function elegirArchivoPendienteFlota(tipo, file){
+  quitarArchivoPendienteFlota(tipo);
+  if (!file) return;
+  const error = validarArchivoDocumento(file);
+  if (error) { showToast(error, "err"); return; }
+  const previewUrl = docFileTypeInfo(file.name).kind === "img" ? URL.createObjectURL(file) : null;
+  flotaDocArchivosPendientes.set(tipo, { file, previewUrl });
+  const box = document.querySelector(`#flotaDocModalSections .doc-picked[data-tipo="${tipo}"]`);
+  const zona = document.querySelector(`#flotaDocModalSections .doc-dropzone[data-tipo="${tipo}"]`);
+  if (box) {
+    box.innerHTML = `${previewUrl ? `<img class="doc-picked-thumb" src="${previewUrl}" alt="" />` : docFileBadgeHtml(file.name)}
+      <span class="doc-picked-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+      <span class="muted">${formatoTamanoArchivo(file.size)}</span>
+      <button type="button" class="doc-link-btn doc-file-clear-btn" data-tipo="${tipo}">Quitar</button>`;
+    box.classList.remove("hidden");
+  }
+  if (zona) zona.classList.add("hidden");
+}
+
+function quitarArchivoPendienteFlota(tipo){
+  const actual = flotaDocArchivosPendientes.get(tipo);
+  if (actual?.previewUrl) URL.revokeObjectURL(actual.previewUrl);
+  flotaDocArchivosPendientes.delete(tipo);
+  const box = document.querySelector(`#flotaDocModalSections .doc-picked[data-tipo="${tipo}"]`);
+  if (box) { box.innerHTML = ""; box.classList.add("hidden"); }
+  document.querySelector(`#flotaDocModalSections .doc-dropzone[data-tipo="${tipo}"]`)?.classList.remove("hidden");
+}
+
+function limpiarArchivosPendientesFlota(){
+  flotaDocArchivosPendientes.forEach(p => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
+  flotaDocArchivosPendientes.clear();
+}
+
+function actualizarCalculoPreventivo(tipo, fecha){
+  const el = document.querySelector(`#flotaDocModalSections .doc-calc[data-tipo="${tipo}"]`);
+  if (el) el.textContent = `Próxima preventiva: ${fecha ? flotaDocFmtFecha(addMonthsISO(fecha, 2)) : "—"}`;
+}
+
+function toggleCorregirFechaFlota(tipo, mostrar){
+  document.querySelector(`#flotaDocModalSections .doc-fecha-edit[data-tipo="${tipo}"]`)?.classList.toggle("hidden", !mostrar);
+}
+
+// Valida lo que se eligio en la tarjeta del documento y lo sube.
+async function guardarDocumentoFlota(tipo, btn){
+  const placa = flotaDocSelectedPlaca;
+  const tipoCfg = FLOTA_DOC_TIPOS.find(t => t.tipo === tipo);
+  if (!placa || !tipoCfg) return;
+  const section = btn?.closest(".flota-doc-section");
+  const file = flotaDocArchivosPendientes.get(tipo)?.file || null;
+  const errorArchivo = validarArchivoDocumento(file);
+  if (errorArchivo) { showToast(errorArchivo, "err"); return; }
+
+  let fechaVencimiento = null;
+  if (!tipoCfg.sinVencimiento) {
+    const fecha = section?.querySelector(".flota-doc-fecha-input")?.value || "";
+    if (!fecha) {
+      showToast(tipoCfg.preventivo ? "Indica la fecha en que se hizo el mantenimiento." : "Indica la fecha de vencimiento del documento.", "err");
+      return;
+    }
+    if (tipoCfg.preventivo) {
+      if (fecha > fechaBogotaISO()) { showToast("La fecha del mantenimiento no puede ser futura.", "err"); return; }
+      fechaVencimiento = addMonthsISO(fecha, 2);
+    } else {
+      fechaVencimiento = fecha;
+      if (diasHastaISO(fecha) < 0 && !confirm(`La fecha ${flotaDocFmtFecha(fecha)} ya pasó: el documento quedará VENCIDO.\n\n¿Guardar de todas formas?`)) return;
+    }
+    // La vista toma como vigente el de vencimiento MAS LEJANO: uno con fecha anterior queda solo en el historial.
+    const vigente = getFlotaDocEstadoFor(placa, tipo);
+    if (vigente?.fecha_vencimiento && fechaVencimiento < vigente.fecha_vencimiento
+        && !confirm(`El documento vigente vence el ${flotaDocFmtFecha(vigente.fecha_vencimiento)}, después de la fecha nueva (${flotaDocFmtFecha(fechaVencimiento)}).\n\nEl sistema muestra siempre el de vencimiento más lejano, así que este archivo quedará solo en el historial. Si la fecha vigente está mal, usa "Corregir fecha".\n\n¿Guardar de todas formas?`)) return;
+  }
+
+  const textoOriginal = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Subiendo…"; }
+  const ok = await subirFlotaDocumento(placa, tipo, file, fechaVencimiento);
+  if (!ok && btn && btn.isConnected) { btn.disabled = false; btn.textContent = textoOriginal; }
+}
+
 async function subirFlotaDocumento(placa, tipo, file, fechaVencimiento){
-  if (!file) { showToast("Selecciona un archivo antes de subir.", "err"); return; }
+  const errorArchivo = validarArchivoDocumento(file);
+  if (errorArchivo) { showToast(errorArchivo, "err"); return false; }
+  let path = null;
   try {
-    const stamp = Date.now();
     const safeName = String(file.name || "documento").replace(/[^\w.\-]+/g, "_");
-    const path = `${placa}/${tipo}/${stamp}_${safeName}`;
+    path = `${placa}/${tipo}/${Date.now()}_${safeName}`;
     const { error: upErr } = await planillaSupabaseClient.storage
       .from(FLOTA_DOC_BUCKET)
       .upload(path, file, { upsert: false, contentType: file.type || undefined });
-    if (upErr) throw upErr;
+    if (upErr) { path = null; throw upErr; }
     const { error: insErr } = await planillaSupabaseClient.from(FLOTA_DOC_TABLE).insert({
       placa,
       tipo,
@@ -11941,27 +12107,626 @@ async function subirFlotaDocumento(placa, tipo, file, fechaVencimiento){
       nombre_archivo_original: file.name || null,
     });
     if (insErr) throw insErr;
-    showToast("Documento subido correctamente.", "ok");
+    showToast("Documento guardado.", "ok");
     await loadFlotaDocumentos({ force: true });
-    if (flotaDocSelectedPlaca === placa) await abrirFlotaDocDetalle(placa);
+    if (flotaDocSelectedPlaca === placa) await abrirFlotaDocDetalle(placa, { focusTipo: tipo });
+    return true;
   } catch (err) {
     console.error("[flota-doc] subida fallo:", err);
-    showToast(`No se pudo subir el documento: ${err?.message || "fallo"}`, "err");
+    // Si el archivo alcanzo a subir pero el registro fallo, no dejarlo huerfano en el bucket.
+    if (path) {
+      try { await planillaSupabaseClient.storage.from(FLOTA_DOC_BUCKET).remove([path]); } catch (_) {}
+    }
+    showToast(`No se pudo guardar el documento: ${err?.message || "fallo"}`, "err");
+    return false;
   }
 }
 
-async function verArchivoFlotaDocumento(storagePath){
-  if (!storagePath) return;
+async function corregirFechaDocumentoFlota(id, tipo, fecha, btn){
+  const placa = flotaDocSelectedPlaca;
+  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(String(fecha || ""))) { showToast("Elige una fecha válida.", "err"); return; }
+  if (btn) btn.disabled = true;
   try {
-    const { data, error } = await planillaSupabaseClient.storage
-      .from(FLOTA_DOC_BUCKET)
-      .createSignedUrl(storagePath, 120);
+    const { data, error } = await planillaSupabaseClient
+      .from(FLOTA_DOC_TABLE)
+      .update({ fecha_vencimiento: fecha })
+      .eq("id", id)
+      .select("id");
     if (error) throw error;
-    if (data?.signedUrl) window.open(data.signedUrl, "_blank", "noopener");
+    if (!data?.length) throw new Error("no se actualizó ningún registro (revisa permisos)");
+    showToast("Fecha corregida.", "ok");
+    await loadFlotaDocumentos({ force: true });
+    if (placa && flotaDocSelectedPlaca === placa) await abrirFlotaDocDetalle(placa, { focusTipo: tipo });
   } catch (err) {
-    console.error("[flota-doc] ver archivo fallo:", err);
-    showToast(`No se pudo abrir el archivo: ${err?.message || "fallo"}`, "err");
+    console.error("[flota-doc] corregir fecha fallo:", err);
+    showToast(`No se pudo corregir la fecha: ${err?.message || "fallo"}`, "err");
+    if (btn && btn.isConnected) btn.disabled = false;
   }
+}
+
+function verArchivoFlotaDocumento(storagePath, opts){
+  if (!storagePath) return;
+  const [placa, tipoPath] = String(storagePath).split("/");
+  const veh = getFlotaVehiculo(placa);
+  const tipoCfg = FLOTA_DOC_TIPOS.find(t => t.tipo === (opts?.tipo || tipoPath));
+  abrirVisorDocumento({
+    bucket: FLOTA_DOC_BUCKET,
+    path: storagePath,
+    nombre: opts?.nombre || "",
+    titulo: tipoCfg?.label || "Documento",
+    subtitulo: veh ? `Interno ${veh.interno || "-"} · ${veh.placa}` : placa,
+  });
+}
+
+// ===== Visor de documentos (PDF / foto) dentro de la app =====
+// Reemplaza el window.open de antes: se ve sin salir del panel, con zoom y rotacion para
+// fotos tomadas con el celular. La URL firmada dura 10 min (bucket privado).
+const DOC_VISOR_URL_TTL_S = 600;
+let docVisorSeq = 0;
+let docVisorRotacion = 0;
+
+async function abrirVisorDocumento({ bucket, path, nombre, titulo, subtitulo }){
+  const modal = document.getElementById("docViewerModal");
+  const body = document.getElementById("docViewerBody");
+  if (!path || !modal || !body) return;
+  const titleEl = document.getElementById("docViewerTitle");
+  const subEl = document.getElementById("docViewerSub");
+  const abrirEl = document.getElementById("docViewerOpen");
+  const descargarEl = document.getElementById("docViewerDownload");
+  const rotarBtn = document.getElementById("docViewerRotate");
+  const zoomBtn = document.getElementById("docViewerZoom");
+  const seq = ++docVisorSeq;
+  docVisorRotacion = 0;
+  const nombreArchivo = nombre || String(path).split("/").pop();
+  const info = docFileTypeInfo(String(nombre || "").includes(".") ? nombre : path);
+
+  if (titleEl) titleEl.textContent = titulo || "Documento";
+  if (subEl) subEl.textContent = subtitulo ? `${subtitulo} · ${nombreArchivo}` : nombreArchivo;
+  [abrirEl, descargarEl].forEach(a => { if (a) { a.removeAttribute("href"); a.classList.add("disabled"); } });
+  rotarBtn?.classList.add("hidden");
+  zoomBtn?.classList.add("hidden");
+  body.innerHTML = `<div class="doc-viewer-msg">Cargando documento…</div>`;
+  modal.classList.remove("hidden");
+
+  try {
+    const storage = planillaSupabaseClient.storage.from(bucket);
+    const [ver, descargar] = await Promise.all([
+      storage.createSignedUrl(path, DOC_VISOR_URL_TTL_S),
+      storage.createSignedUrl(path, DOC_VISOR_URL_TTL_S, { download: nombreArchivo }),
+    ]);
+    if (seq !== docVisorSeq) return;
+    if (ver.error) throw ver.error;
+    const url = ver.data?.signedUrl;
+    if (!url) throw new Error("no se obtuvo el enlace del archivo");
+    if (abrirEl) { abrirEl.href = url; abrirEl.classList.remove("disabled"); }
+    const urlDescarga = descargar.data?.signedUrl;
+    if (descargarEl && urlDescarga) { descargarEl.href = urlDescarga; descargarEl.classList.remove("disabled"); }
+
+    if (info.kind === "pdf") {
+      body.innerHTML = `<iframe class="doc-viewer-frame" src="${escapeHtml(url)}#view=FitH" title="${escapeHtml(nombreArchivo)}"></iframe>
+        <div class="doc-viewer-hint">¿No se ve el PDF? (pasa en algunos celulares) Usa <b>Abrir en pestaña</b> o <b>Descargar</b>.</div>`;
+    } else if (info.kind === "img") {
+      body.innerHTML = `<div class="doc-viewer-imgwrap"><img class="doc-viewer-img" src="${escapeHtml(url)}" alt="${escapeHtml(nombreArchivo)}" /></div>`;
+      rotarBtn?.classList.remove("hidden");
+      if (zoomBtn) { zoomBtn.classList.remove("hidden"); zoomBtn.textContent = "🔍 Ampliar"; }
+      body.querySelector("img")?.addEventListener("error", () => {
+        if (seq !== docVisorSeq) return;
+        rotarBtn?.classList.add("hidden");
+        zoomBtn?.classList.add("hidden");
+        body.innerHTML = `<div class="doc-viewer-msg">Este navegador no puede mostrar la foto (p. ej. formato HEIC de iPhone).<br>Usa <b>Descargar</b> o <b>Abrir en pestaña</b>.</div>`;
+      });
+    } else {
+      body.innerHTML = `<div class="doc-viewer-msg">Este tipo de archivo (${escapeHtml(info.label)}) no tiene vista previa.<br>Usa <b>Descargar</b> o <b>Abrir en pestaña</b>.</div>`;
+    }
+  } catch (err) {
+    if (seq !== docVisorSeq) return;
+    console.error("[visor] no se pudo abrir el archivo:", err);
+    body.innerHTML = `<div class="doc-viewer-msg doc-viewer-err">No se pudo abrir el archivo: ${escapeHtml(err?.message || "fallo")}</div>`;
+  }
+}
+
+function cerrarVisorDocumento(){
+  docVisorSeq++;
+  const body = document.getElementById("docViewerBody");
+  if (body) body.innerHTML = ""; // corta la descarga del PDF o la foto
+  document.getElementById("docViewerModal")?.classList.add("hidden");
+}
+
+function aplicarRotacionVisor(){
+  const wrap = document.querySelector("#docViewerBody .doc-viewer-imgwrap");
+  const img = wrap?.querySelector("img");
+  if (!img) return;
+  img.style.transform = docVisorRotacion ? `rotate(${docVisorRotacion}deg)` : "";
+  // De lado (90/270) se intercambian los limites para que la foto girada quepa completa.
+  if (docVisorRotacion % 180 !== 0 && !wrap.classList.contains("is-zoom")) {
+    img.style.maxWidth = `${Math.max(100, wrap.clientHeight - 20)}px`;
+    img.style.maxHeight = `${Math.max(100, wrap.clientWidth - 20)}px`;
+  } else {
+    img.style.maxWidth = "";
+    img.style.maxHeight = "";
+  }
+}
+
+function rotarVisorDocumento(){
+  docVisorRotacion = (docVisorRotacion + 90) % 360;
+  aplicarRotacionVisor();
+}
+
+function alternarZoomVisorDocumento(){
+  const wrap = document.querySelector("#docViewerBody .doc-viewer-imgwrap");
+  if (!wrap) return;
+  const zoom = wrap.classList.toggle("is-zoom");
+  const zoomBtn = document.getElementById("docViewerZoom");
+  if (zoomBtn) zoomBtn.textContent = zoom ? "🔍 Ajustar" : "🔍 Ampliar";
+  aplicarRotacionVisor();
+}
+
+// ==================== ALERTAS DE DOCUMENTOS · RUTA 700 (AEROPUERTO) ====================
+// Vigila los documentos de los carros activos de la ruta 700 (los que opera este panel):
+//  - Panel arriba de Documentacion Flota: vencidos y por vencer (<=30 dias), mas los que
+//    faltan por cargar o no tienen fecha (listados aparte, no disparan aviso).
+//  - Badge de la pestaña: documentos vencidos o por vencer de la ruta 700.
+//  - Aviso flotante en cualquier pestaña (abajo a la derecha, con los demas avisos): vencidos
+//    y por vencer (<=30 dias). Se pospone 4 h, pero vuelve a salir antes si aparece un
+//    documento nuevo en alerta.
+const FLOTA_ALERTA_RUTA_CODIGO = "700";
+const FLOTA_ALERTA_RUTA_NOMBRE = "AEROPUERTO";
+const FLOTA_ALERTA_URGENTE_DIAS = 7;
+const FLOTA_ALERTA_POLL_MS = 10 * 60 * 1000;
+const FLOTA_ALERTA_SNOOZE_HORAS = 4;
+const FLOTA_ALERTA_SNOOZE_LS = "combuses_flota_doc_snooze_v2"; // v2: el aviso ahora cubre toda la flota
+const FLOTA_ALERTA_MAX_FLOTANTE = 6;
+
+let flotaAlertaVehiculos = [];
+let flotaAlertaResultado = null; // { alertas, faltantes, vehiculos }
+let flotaAlertaCargando = null;
+let flotaAlertaTimer = null;
+let flotaAlertaFiltro = { nivel: "", tipo: "" }; // fichas del panel: nivel = VENCIDO | URGENTE | POR_VENCER
+
+// Nivel de una alerta, para las fichas del panel (cada alerta cae en uno solo).
+function nivelAlertaDocumento(a){
+  if (a.estado === "VENCIDO") return "VENCIDO";
+  return a.dias <= FLOTA_ALERTA_URGENTE_DIAS ? "URGENTE" : "POR_VENCER";
+}
+
+function esVehiculoRuta700(v){
+  return String(v?.ruta ?? "").trim() === FLOTA_ALERTA_RUTA_CODIGO || norm(v?.nombre_ruta) === FLOTA_ALERTA_RUTA_NOMBRE;
+}
+
+// Los retirados (vinculado/operante = false) no generan alertas.
+function esVehiculoActivo(v){
+  return v?.vinculado !== false && v?.operante !== false;
+}
+
+function compararPorInterno(a, b){
+  return String(a?.interno || "").localeCompare(String(b?.interno || ""), "es", { numeric: true });
+}
+
+function calcularAlertasDocumentos(vehiculos, estadoRows){
+  const porPlacaTipo = new Map((estadoRows || []).map(r => [`${r.placa}|${r.tipo}`, r]));
+  const alertas = [];
+  const faltantes = [];
+  vehiculos.forEach(v => {
+    const faltan = [];
+    FLOTA_DOC_TIPOS_DOCUMENTO.forEach(t => {
+      const row = porPlacaTipo.get(`${v.placa}|${t.tipo}`) || null;
+      const { estado, dias } = estadoDocumento(row, t);
+      if (estado === "SIN_REGISTRO" || estado === "SIN_FECHA") {
+        faltan.push({ tipoCfg: t, sinFecha: estado === "SIN_FECHA" });
+      } else if (estado === "VENCIDO" || estado === "POR_VENCER") {
+        alertas.push({ v, tipoCfg: t, row, estado, dias, urgente: estado === "VENCIDO" || dias <= FLOTA_ALERTA_URGENTE_DIAS });
+      }
+    });
+    if (faltan.length) faltantes.push({ v, faltan });
+  });
+  alertas.sort((a, b) => (a.dias - b.dias) || compararPorInterno(a.v, b.v));
+  faltantes.sort((a, b) => compararPorInterno(a.v, b.v));
+  return { alertas, faltantes, vehiculos };
+}
+
+function actualizarFlotaAlertas(vehiculos, estadoRows){
+  flotaAlertaVehiculos = (vehiculos || []).filter(v => esVehiculoRuta700(v) && esVehiculoActivo(v));
+  flotaAlertaResultado = calcularAlertasDocumentos(flotaAlertaVehiculos, estadoRows);
+  setFlotaDocTabBadge(flotaAlertaResultado.alertas.length);
+  renderFlotaAlertaPanel();
+  renderFlotaAlertaFlotante();
+}
+
+// Consulta liviana (solo la ruta 700) para el aviso global y el badge, sin abrir la pestaña.
+async function loadFlotaAlertasRuta700(){
+  if (!currentUserId) return;
+  if (flotaAlertaCargando) return flotaAlertaCargando;
+  flotaAlertaCargando = (async () => {
+    try {
+      const { data: veh, error: vehErr } = await planillaSupabaseClient
+        .from(FLOTA_VEHICULOS_TABLE)
+        .select("placa, interno, marca, modelo, ruta, nombre_ruta, vinculado, operante")
+        .or(`ruta.eq.${FLOTA_ALERTA_RUTA_CODIGO},nombre_ruta.eq.${FLOTA_ALERTA_RUTA_NOMBRE}`);
+      if (vehErr) throw vehErr;
+      const vehiculos = (veh || []).filter(v => esVehiculoRuta700(v) && esVehiculoActivo(v));
+      const placas = vehiculos.map(v => v.placa).filter(Boolean);
+      let docs = [];
+      if (placas.length) {
+        const { data, error } = await planillaSupabaseClient
+          .from(FLOTA_DOC_VIEW)
+          .select("id, placa, tipo, fecha_vencimiento, estado_vencimiento, storage_path, nombre_archivo_original, created_at")
+          .in("placa", placas);
+        if (error) throw error;
+        docs = data || [];
+      }
+      actualizarFlotaAlertas(vehiculos, docs);
+    } catch (err) {
+      console.warn("[flota-doc] alertas ruta 700 fallaron:", err);
+    } finally {
+      flotaAlertaCargando = null;
+    }
+  })();
+  return flotaAlertaCargando;
+}
+
+function ensureFlotaAlertasGlobal(){
+  if (flotaAlertaTimer) return;
+  loadFlotaAlertasRuta700();
+  loadAvisoDocumentosFlota();
+  // Cada 10 min (los documentos cambian poco; esto tambien recalcula los dias al pasar la medianoche).
+  flotaAlertaTimer = setInterval(() => {
+    if (document.hidden) return;
+    loadFlotaAlertasRuta700();
+    loadAvisoDocumentosFlota();
+  }, FLOTA_ALERTA_POLL_MS);
+}
+
+function detenerFlotaAlertasGlobal(){
+  if (flotaAlertaTimer) { clearInterval(flotaAlertaTimer); flotaAlertaTimer = null; }
+  flotaAlertaResultado = null;
+  flotaAlertaVehiculos = [];
+  flotaAlertaFiltro = { nivel: "", tipo: "" };
+  flotaAvisoDocs = null;
+  setFlotaDocTabBadge(0);
+  document.getElementById("flotaAlertaFlotante")?.remove();
+}
+
+function renderFlotaAlertaPanel(){
+  const panel = document.getElementById("flotaAlertaPanel");
+  if (!panel) return;
+  const r = flotaAlertaResultado;
+  if (!r) {
+    panel.className = "fa-panel";
+    panel.innerHTML = `<div class="fa-panel-head"><div class="fa-panel-title">🚨 Alertas de documentos · Ruta 700</div><span class="muted">Cargando…</span></div>`;
+    return;
+  }
+  const faltantesAbierto = !!panel.querySelector(".fa-faltantes")?.open;
+  const f = flotaAlertaFiltro;
+  // Conteo cruzado: los de estado respetan el documento elegido y viceversa; la tabla muestra el cruce.
+  const delTipo = f.tipo ? r.alertas.filter(a => a.tipoCfg.tipo === f.tipo) : r.alertas;
+  const delNivel = f.nivel ? r.alertas.filter(a => nivelAlertaDocumento(a) === f.nivel) : r.alertas;
+  const visibles = f.tipo ? delNivel.filter(a => a.tipoCfg.tipo === f.tipo) : delNivel;
+  const contarNivel = (nivel) => delTipo.filter(a => nivelAlertaDocumento(a) === nivel).length;
+  const faltanDocs = r.faltantes.reduce((n, x) => n + x.faltan.length, 0);
+  const chip = (cls, n, txt) => `<span class="fa-chip ${cls}${n ? "" : " is-zero"}"><b>${n}</b> ${txt}</span>`;
+  const chipFiltro = (cls, attr, valor, activo, n, html) =>
+    `<button type="button" class="fa-chip fa-chip-filtro ${cls}${n ? "" : " is-zero"}${activo ? " is-active" : ""}" ${attr}="${valor}" aria-pressed="${activo}"${n || activo ? "" : " disabled"}>${html}</button>`;
+  const chipNivel = (nivel, cls, txt) => {
+    const n = contarNivel(nivel);
+    return chipFiltro(cls, "data-fa-nivel", nivel, f.nivel === nivel, n, `<b>${n}</b> ${txt}`);
+  };
+  const chipsDocumento = FLOTA_DOC_TIPOS_DOCUMENTO.filter(t => !t.sinVencimiento).map(t => {
+    const n = delNivel.filter(a => a.tipoCfg.tipo === t.tipo).length;
+    return chipFiltro("fa-chip-doc", "data-fa-tipo", t.tipo, f.tipo === t.tipo, n, `${escapeHtml(t.label)} <b>${n}</b>`);
+  }).join("");
+
+  const filas = visibles.map(a => {
+    const rowCls = a.estado === "VENCIDO" ? "fa-row-vencido" : (a.urgente ? "fa-row-urgente" : "");
+    const verBtn = a.row?.storage_path
+      ? `<button type="button" class="btn btn-ghost btn-sm" data-fa-ver="${escapeHtml(a.row.storage_path)}" data-nombre="${escapeHtml(a.row.nombre_archivo_original || "")}" data-tipo="${a.tipoCfg.tipo}">👁 Ver</button>`
+      : `<span class="muted" title="El registro no tiene archivo adjunto">sin archivo</span>`;
+    return `<tr class="${rowCls}">
+      <td><b>${escapeHtml(a.v.interno || "-")}</b></td>
+      <td>${escapeHtml(a.v.placa || "-")}</td>
+      <td>${escapeHtml(a.tipoCfg.label)}</td>
+      <td>${flotaDocFmtFecha(a.row?.fecha_vencimiento)}</td>
+      <td><span class="doc-dias ${claseDiasVencimiento(a.estado, a.dias)}">${textoDiasVencimiento(a.dias)}</span></td>
+      <td class="fa-acciones">${verBtn}
+        <button type="button" class="btn btn-primary btn-sm" data-fa-actualizar="${escapeHtml(a.v.placa)}" data-tipo="${a.tipoCfg.tipo}">Actualizar</button></td>
+    </tr>`;
+  }).join("");
+
+  const filtrando = !!(f.nivel || f.tipo);
+  let tablaHtml;
+  if (!r.alertas.length) {
+    tablaHtml = `<div class="fa-ok">✅ Ningún documento de la ruta 700 está vencido ni vence en los próximos ${FLOTA_DOC_POR_VENCER_DIAS} días.</div>`;
+  } else if (!visibles.length) {
+    tablaHtml = `<div class="fa-vacio muted">Ningún documento con ese filtro.</div>`;
+  } else {
+    tablaHtml = `<div class="fa-tabla-wrap"><table class="ent-tabla fa-tabla">
+        <thead><tr><th>INTERNO</th><th>PLACA</th><th>DOCUMENTO</th><th>VENCE</th><th>ESTADO</th><th></th></tr></thead>
+        <tbody>${filas}</tbody>
+      </table></div>`;
+  }
+
+  const faltantesHtml = r.faltantes.length ? `
+    <details class="fa-faltantes"${faltantesAbierto ? " open" : ""}>
+      <summary>Falta cargar o sin fecha · ${faltanDocs} documento(s) en ${r.faltantes.length} carro(s)</summary>
+      <ul>${r.faltantes.map(f => `
+        <li>
+          <b>${escapeHtml(f.v.interno || "-")}</b> <span class="muted">${escapeHtml(f.v.placa || "")}</span>
+          <span class="fa-falta-docs">${f.faltan.map(x => escapeHtml(x.tipoCfg.label) + (x.sinFecha ? " (sin fecha)" : "")).join(", ")}</span>
+          <button type="button" class="doc-link-btn" data-fa-actualizar="${escapeHtml(f.v.placa)}" data-tipo="${f.faltan[0].tipoCfg.tipo}">Cargar</button>
+        </li>`).join("")}
+      </ul>
+    </details>` : "";
+
+  panel.className = `fa-panel${r.alertas.length ? "" : " fa-panel-ok"}`;
+  panel.innerHTML = `
+    <div class="fa-panel-head">
+      <div class="fa-panel-title">🚨 Alertas de documentos · Ruta 700 <span class="fa-panel-sub">${r.vehiculos.length} carros activos</span></div>
+      <button type="button" class="btn btn-ghost btn-sm" data-fa-accion="filtrar">Ver ruta 700 en la tabla</button>
+    </div>
+    <div class="fa-chips">
+      ${chipNivel("VENCIDO", "fa-chip-vencido", "vencidos")}
+      ${chipNivel("URGENTE", "fa-chip-urgente", `vencen en ≤${FLOTA_ALERTA_URGENTE_DIAS} días`)}
+      ${chipNivel("POR_VENCER", "fa-chip-porvencer", `por vencer (≤${FLOTA_DOC_POR_VENCER_DIAS} días)`)}
+      ${chip("fa-chip-falta", faltanDocs, "falta cargar")}
+    </div>
+    ${r.alertas.length ? `<div class="fa-chips fa-chips-doc">
+      <span class="fa-chips-label">Documento:</span>
+      ${chipsDocumento}
+      ${filtrando ? `<span class="fa-filtro-info">Mostrando ${visibles.length} de ${r.alertas.length} · <button type="button" class="doc-link-btn" data-fa-accion="limpiar">Quitar filtros</button></span>` : ""}
+    </div>` : ""}
+    ${tablaHtml}
+    ${faltantesHtml}`;
+}
+
+function filtrarTablaFlotaRuta700(){
+  const sel = document.getElementById("flotaDocRutaFilter");
+  const etiqueta = getFlotaDocRutaLabel(flotaAlertaVehiculos[0]);
+  if (sel && etiqueta && Array.from(sel.options).some(o => o.value === etiqueta)) {
+    sel.value = etiqueta;
+    renderFlotaDocumentosTab();
+  }
+  document.getElementById("flotaDocTable")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ----- Aviso flotante global -----
+// El aviso flotante es el recordatorio de lo que hay que renovar a tiempo: los documentos de
+// TODA la flota activa que vencen en los proximos 30 dias, del mas cercano al mas lejano. Los
+// vencidos van como conteo (la ruta 700 aparte), para no tapar la lista.
+let flotaAvisoDocs = null; // { proximos: [...], vencidos: [...] }
+
+function calcularAvisoDocumentos(vehiculos, estadoRows){
+  const porPlaca = new Map((vehiculos || []).filter(esVehiculoActivo).map(v => [v.placa, v]));
+  const tipos = new Map(FLOTA_DOC_TIPOS_DOCUMENTO.filter(t => !t.sinVencimiento).map(t => [t.tipo, t]));
+  const proximos = [], vencidos = [];
+  (estadoRows || []).forEach(row => {
+    const v = porPlaca.get(row.placa), t = tipos.get(row.tipo);
+    if (!v || !t) return;
+    const { estado, dias } = estadoDocumento(row, t);
+    if (estado === "VENCIDO") vencidos.push({ v, tipoCfg: t, row, estado, dias });
+    else if (estado === "POR_VENCER") proximos.push({ v, tipoCfg: t, row, estado, dias });
+  });
+  proximos.sort((a, b) => (a.dias - b.dias) || compararPorInterno(a.v, b.v));
+  return { proximos, vencidos };
+}
+
+// Consulta liviana para el aviso (cada 10 min desde el login): vehiculos y solo los documentos
+// que vencen hasta dentro de 30 dias.
+async function loadAvisoDocumentosFlota(){
+  if (!currentUserId) return;
+  try {
+    const hoy = fechaBogotaISO();
+    const limite = new Date(Date.parse(`${hoy}T00:00:00Z`) + FLOTA_DOC_POR_VENCER_DIAS * 86400000).toISOString().slice(0, 10);
+    const tipos = FLOTA_DOC_TIPOS_DOCUMENTO.filter(t => !t.sinVencimiento).map(t => t.tipo);
+    const [vehiculos, docs] = await Promise.all([
+      fetchTodasLasFilas(() => planillaSupabaseClient.from(FLOTA_VEHICULOS_TABLE)
+        .select("placa, interno, ruta, nombre_ruta, vinculado, operante").order("placa", { ascending: true })),
+      fetchTodasLasFilas(() => planillaSupabaseClient.from(FLOTA_DOC_VIEW)
+        .select("placa, tipo, fecha_vencimiento, estado_vencimiento, storage_path, nombre_archivo_original")
+        .in("tipo", tipos).lte("fecha_vencimiento", limite).order("placa", { ascending: true })),
+    ]);
+    flotaAvisoDocs = calcularAvisoDocumentos(vehiculos, docs);
+    renderFlotaAlertaFlotante();
+  } catch (err) {
+    console.warn("[flota-doc] aviso de documentos fallo:", err);
+  }
+}
+
+function getFlotaAlertasAviso(){
+  return flotaAvisoDocs?.proximos || [];
+}
+
+function flotaAlertaClave(a){
+  return `${a.v.placa}|${a.tipoCfg.tipo}|${a.estado === "VENCIDO" ? "V" : "U"}`;
+}
+
+function flotaAlertaPospuesta(claves){
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(FLOTA_ALERTA_SNOOZE_LS) || "null"); } catch (_) {}
+  if (!s || !(Date.now() < s.hasta) || !Array.isArray(s.claves)) return false;
+  const yaVistas = new Set(s.claves);
+  return claves.every(k => yaVistas.has(k)); // una alerta nueva hace que el aviso vuelva a salir
+}
+
+function clavesAvisoDocumentos(){
+  const a = flotaAvisoDocs || { proximos: [], vencidos: [] };
+  return a.proximos.concat(a.vencidos).map(flotaAlertaClave);
+}
+
+function posponerFlotaAlertaFlotante(){
+  try {
+    localStorage.setItem(FLOTA_ALERTA_SNOOZE_LS, JSON.stringify({ hasta: Date.now() + FLOTA_ALERTA_SNOOZE_HORAS * 3600000, claves: clavesAvisoDocumentos() }));
+  } catch (_) {}
+  renderFlotaAlertaFlotante();
+  showToast(`Aviso pospuesto ${FLOTA_ALERTA_SNOOZE_HORAS} h. Sale antes si otro documento entra en alerta.`, "warn");
+}
+
+// Abre Documentacion Flota con la tabla filtrada en Vencidos.
+function verDocumentosVencidos(){
+  const sel = document.getElementById("flotaDocEstadoFilter");
+  if (sel) sel.value = "VENCIDO";
+  const ruta = document.getElementById("flotaDocRutaFilter");
+  if (ruta) ruta.value = "";
+  irADocumentacionFlota();
+  if (flotaDocLastLoadedAt) renderFlotaDocumentosTab();
+}
+
+function renderFlotaAlertaFlotante(){
+  const proximos = flotaAvisoDocs?.proximos || [];
+  const vencidos = flotaAvisoDocs?.vencidos || [];
+  let box = document.getElementById("flotaAlertaFlotante");
+  // En la pestaña de documentos ya se ve todo: no tapar la vista.
+  const ocultar = !currentUserId || (!proximos.length && !vencidos.length) || getActiveTabId() === "flota-documentos"
+    || flotaAlertaPospuesta(clavesAvisoDocumentos());
+  if (ocultar) { if (box) box.remove(); return; }
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "flotaAlertaFlotante";
+    box.className = "fa-flotante";
+    box.setAttribute("role", "alert");
+    box.addEventListener("click", (ev) => {
+      const accion = ev.target.closest("[data-fa-accion]")?.getAttribute("data-fa-accion");
+      if (accion === "posponer") { posponerFlotaAlertaFlotante(); return; }
+      if (accion === "abrir") { irADocumentacionFlota(); return; }
+      if (accion === "vencidos") { verDocumentosVencidos(); return; }
+      const item = ev.target.closest("[data-fa-placa]");
+      if (item) irADocumentacionFlota(item.getAttribute("data-fa-placa"), item.getAttribute("data-tipo"));
+    });
+    contenedorAvisosFlotantes().appendChild(box);
+  }
+  const pronto = proximos.filter(a => a.dias <= FLOTA_ALERTA_URGENTE_DIAS).length;
+  const resumen = proximos.length
+    ? `${proximos.length} ${proximos.length === 1 ? "vence" : "vencen"} en los próximos ${FLOTA_DOC_POR_VENCER_DIAS} días${pronto ? ` · ${pronto} en ≤${FLOTA_ALERTA_URGENTE_DIAS} días` : ""}`
+    : `Ninguno vence en los próximos ${FLOTA_DOC_POR_VENCER_DIAS} días`;
+  const items = proximos.slice(0, FLOTA_ALERTA_MAX_FLOTANTE).map(a => `
+    <li><button type="button" class="fa-item" data-fa-placa="${escapeHtml(a.v.placa)}" data-tipo="${a.tipoCfg.tipo}" title="${escapeHtml(`${a.v.placa} · ${getFlotaDocRutaLabel(a.v) || "sin ruta"}`)}">
+      <span class="fa-item-int">${escapeHtml(a.v.interno || a.v.placa)}</span>
+      <span class="fa-item-doc">${escapeHtml(a.tipoCfg.label)}</span>
+      <span class="doc-dias ${claseDiasVencimiento(a.estado, a.dias)}">${textoDiasVencimiento(a.dias)}</span>
+    </button></li>`).join("");
+  const mas = proximos.length > FLOTA_ALERTA_MAX_FLOTANTE ? `<div class="fa-mas">y ${proximos.length - FLOTA_ALERTA_MAX_FLOTANTE} más…</div>` : "";
+  const v700 = vencidos.filter(a => esVehiculoRuta700(a.v)).length;
+  const vOtras = vencidos.length - v700;
+  const vencidosHtml = vencidos.length ? `
+      <div class="fa-vencidos">
+        <span>⚠ Vencidos: <b>${v700}</b> en la ruta 700${vOtras ? ` · <b>${vOtras}</b> en otras rutas` : ""}</span>
+        <button type="button" class="doc-link-btn" data-fa-accion="vencidos">Ver vencidos</button>
+      </div>` : "";
+  box.innerHTML = `
+    <div class="fa-flotante-head">
+      <span>📄 Documentos por vencer</span>
+      <button type="button" class="fa-flotante-x" data-fa-accion="posponer" title="Posponer ${FLOTA_ALERTA_SNOOZE_HORAS} h" aria-label="Posponer aviso">✕</button>
+    </div>
+    <div class="fa-flotante-body">
+      <div class="fa-flotante-resumen">${resumen}</div>
+      ${items ? `<ul class="fa-lista">${items}</ul>` : ""}
+      ${mas}
+      ${vencidosHtml}
+      <div class="fa-flotante-acciones">
+        <button type="button" class="btn btn-ghost btn-sm" data-fa-accion="posponer">Posponer ${FLOTA_ALERTA_SNOOZE_HORAS} h</button>
+        <button type="button" class="btn btn-primary btn-sm" data-fa-accion="abrir">Abrir Documentación</button>
+      </div>
+    </div>`;
+}
+
+async function irADocumentacionFlota(placa, tipo){
+  document.querySelector('.tab[data-tab="flota-documentos"]')?.click();
+  if (placa) await abrirFlotaDocDetalle(placa, { focusTipo: tipo || null });
+}
+
+// Eventos del detalle del vehiculo, del visor y del panel de alertas.
+function bindFlotaDocEvents(){
+  const sections = document.getElementById("flotaDocModalSections");
+  if (sections) {
+    sections.addEventListener("click", (ev) => {
+      let btn = ev.target.closest(".flota-doc-subir-btn");
+      if (btn) { guardarDocumentoFlota(btn.getAttribute("data-tipo"), btn); return; }
+      btn = ev.target.closest(".flota-doc-ver-btn");
+      if (btn) { verArchivoFlotaDocumento(btn.getAttribute("data-path"), { nombre: btn.getAttribute("data-nombre"), tipo: btn.getAttribute("data-tipo") }); return; }
+      btn = ev.target.closest(".doc-fecha-edit-btn");
+      if (btn) { toggleCorregirFechaFlota(btn.getAttribute("data-tipo"), true); return; }
+      btn = ev.target.closest(".doc-fecha-cancel-btn");
+      if (btn) { toggleCorregirFechaFlota(btn.getAttribute("data-tipo"), false); return; }
+      btn = ev.target.closest(".doc-fecha-save-btn");
+      if (btn) {
+        const fecha = btn.closest(".doc-fecha-edit")?.querySelector(".doc-fecha-edit-input")?.value || "";
+        corregirFechaDocumentoFlota(btn.getAttribute("data-id"), btn.getAttribute("data-tipo"), fecha, btn);
+        return;
+      }
+      btn = ev.target.closest(".doc-file-clear-btn");
+      if (btn) quitarArchivoPendienteFlota(btn.getAttribute("data-tipo"));
+    });
+    sections.addEventListener("change", (ev) => {
+      const fileInput = ev.target.closest(".flota-doc-file-input");
+      if (fileInput) {
+        elegirArchivoPendienteFlota(fileInput.getAttribute("data-tipo"), fileInput.files?.[0] || null);
+        fileInput.value = ""; // permite volver a elegir el mismo archivo
+        return;
+      }
+      const fechaInput = ev.target.closest(".flota-doc-fecha-input");
+      if (fechaInput) actualizarCalculoPreventivo(fechaInput.getAttribute("data-tipo"), fechaInput.value);
+    });
+    // Arrastrar y soltar el archivo sobre la zona de carga de cada documento.
+    ["dragenter", "dragover"].forEach(evt => sections.addEventListener(evt, (ev) => {
+      const zona = ev.target.closest(".doc-dropzone");
+      if (!zona) return;
+      ev.preventDefault();
+      zona.classList.add("is-drag");
+    }));
+    sections.addEventListener("dragleave", (ev) => {
+      const zona = ev.target.closest(".doc-dropzone");
+      if (zona && !zona.contains(ev.relatedTarget)) zona.classList.remove("is-drag");
+    });
+    sections.addEventListener("drop", (ev) => {
+      const zona = ev.target.closest(".doc-dropzone");
+      if (!zona) return;
+      ev.preventDefault();
+      zona.classList.remove("is-drag");
+      const file = ev.dataTransfer?.files?.[0];
+      if (file) elegirArchivoPendienteFlota(zona.getAttribute("data-tipo"), file);
+    });
+  }
+  // Un archivo soltado fuera de la zona no debe hacer que el navegador abandone la app.
+  const modal = document.getElementById("flotaDocModal");
+  if (modal) ["dragover", "drop"].forEach(evt => modal.addEventListener(evt, (ev) => ev.preventDefault()));
+  document.getElementById("flotaDocModalCerrar")?.addEventListener("click", cerrarFlotaDocDetalle);
+
+  // Visor
+  const visor = document.getElementById("docViewerModal");
+  if (visor) visor.addEventListener("click", (ev) => { if (ev.target === visor) cerrarVisorDocumento(); });
+  document.getElementById("docViewerClose")?.addEventListener("click", cerrarVisorDocumento);
+  document.getElementById("docViewerRotate")?.addEventListener("click", rotarVisorDocumento);
+  document.getElementById("docViewerZoom")?.addEventListener("click", alternarZoomVisorDocumento);
+  document.getElementById("docViewerBody")?.addEventListener("click", (ev) => {
+    if (ev.target.closest(".doc-viewer-img")) alternarZoomVisorDocumento();
+  });
+  // Esc cierra el visor antes que cualquier otro modal (fase de captura).
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || !visor || visor.classList.contains("hidden")) return;
+    ev.stopImmediatePropagation();
+    cerrarVisorDocumento();
+  }, true);
+
+  // Panel de alertas de la ruta 700
+  const panel = document.getElementById("flotaAlertaPanel");
+  if (panel) panel.addEventListener("click", (ev) => {
+    let btn = ev.target.closest("[data-fa-ver]");
+    if (btn) { verArchivoFlotaDocumento(btn.getAttribute("data-fa-ver"), { nombre: btn.getAttribute("data-nombre"), tipo: btn.getAttribute("data-tipo") }); return; }
+    btn = ev.target.closest("[data-fa-actualizar]");
+    if (btn) { abrirFlotaDocDetalle(btn.getAttribute("data-fa-actualizar"), { focusTipo: btn.getAttribute("data-tipo") }); return; }
+    btn = ev.target.closest("[data-fa-nivel], [data-fa-tipo]");
+    if (btn) {
+      const campo = btn.hasAttribute("data-fa-nivel") ? "nivel" : "tipo";
+      const valor = btn.getAttribute(campo === "nivel" ? "data-fa-nivel" : "data-fa-tipo");
+      flotaAlertaFiltro[campo] = flotaAlertaFiltro[campo] === valor ? "" : valor;
+      renderFlotaAlertaPanel();
+      return;
+    }
+    if (ev.target.closest('[data-fa-accion="limpiar"]')) {
+      flotaAlertaFiltro = { nivel: "", tipo: "" };
+      renderFlotaAlertaPanel();
+      return;
+    }
+    if (ev.target.closest('[data-fa-accion="filtrar"]')) filtrarTablaFlotaRuta700();
+  });
 }
 
 // ==================== DOCUMENTACION CONDUCTORES ====================
@@ -12190,18 +12955,17 @@ async function subirConductorDocumento(cedula, tipo, file, fechaVencimiento, cat
   }
 }
 
-async function verArchivoConductorDocumento(storagePath){
+function verArchivoConductorDocumento(storagePath){
   if (!storagePath) return;
-  try {
-    const { data, error } = await planillaSupabaseClient.storage
-      .from(CONDUCTOR_DOC_BUCKET)
-      .createSignedUrl(storagePath, 120);
-    if (error) throw error;
-    if (data?.signedUrl) window.open(data.signedUrl, "_blank", "noopener");
-  } catch (err) {
-    console.error("[conductor-doc] ver archivo fallo:", err);
-    showToast(`No se pudo abrir el archivo: ${err?.message || "fallo"}`, "err");
-  }
+  const [cedula, tipoPath] = String(storagePath).split("/");
+  const drv = driversCatalogRows.find(d => d.cedula === cedula);
+  const tipoCfg = CONDUCTOR_DOC_TIPOS.find(t => t.tipo === tipoPath);
+  abrirVisorDocumento({
+    bucket: CONDUCTOR_DOC_BUCKET,
+    path: storagePath,
+    titulo: tipoCfg?.label || "Documento",
+    subtitulo: drv?.nombre ? `${drv.nombre} · CC ${cedula}` : `CC ${cedula}`,
+  });
 }
 
 // ==================== INIT ====================

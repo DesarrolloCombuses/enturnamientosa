@@ -40,7 +40,8 @@ n" href="icons/icon-192.svg">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
-<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/styles.css?v=1.18.1">
+<link rel="stylesheet" href="css/erp.css?v=1.18.1">
 </head>
 <body>
 
@@ -69,68 +70,98 @@ n" href="icons/icon-192.svg">
   </div>
 </div>
 
-<div id="appWrap" class="wrap hidden">
-  <!-- TOP BAR -->
-  <div class="topbar">
-    <div class="row">
-      <div class="brand" aria-label="Combuses">
-        <span class="brand-mark" aria-hidden="true">C</span>
-        <span class="brand-text">
-          <strong>Combuses</strong>
-          <small>Planilla de Enturnamiento</small>
-        </span>
+<div id="appWrap" class="wrap app-shell hidden">
+  <!-- MENU LATERAL: los modulos agrupan las mismas pestanas (.tab[data-tab]) de siempre -->
+  <aside class="sidebar" id="appSidebar" aria-label="Menú principal">
+    <div class="sidebar-brand brand" aria-label="Combuses">
+      <span class="brand-mark" aria-hidden="true">C</span>
+      <span class="brand-text">
+        <strong>Combuses</strong>
+        <small>Planilla de Enturnamiento</small>
+      </span>
+    </div>
+    <nav class="side-nav">
+      <div class="nav-group" data-grupo="despachos">
+        <div class="nav-group-title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 18.5 18.5 5.5M9 5.5h9.5V15"/></svg><span>Despachos</span></div>
+        <div class="tab" data-tab="despachos-aeropuerto">Despachos Aeropuerto</div>
+        <div class="tab" data-tab="planilla-despachos">Planilla Almacentro</div>
+        <div class="tab" data-tab="planilla-despachos-sandiego">Planilla CC San Diego</div>
+        <div class="tab" data-tab="planilla-despachos-expo">Planilla Exposiciones</div>
+        <div class="tab" data-tab="historial-despachos">Historial despachos</div>
       </div>
-    </div>
-    <div class="row">
-      <button class="btn btn-success" id="btnManualDispatch">Despacho manual</button>
-      <button class="btn btn-ghost" id="btnThemeToggle" title="Cambiar modo claro/oscuro" aria-label="Cambiar modo claro/oscuro">🌙</button>
-      <span class="pill app-version" id="appVersion" title="Versión de la aplicación (toca para buscar actualización)">v—</span>
-      <span class="pill" id="authUserLabel">No autenticado</span>
-      <button class="btn btn-danger hidden" id="btnLogout">Cerrar sesion</button>
-    </div>
-  </div>
+      <div class="nav-group" data-grupo="llegadas">
+        <div class="nav-group-title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10.5l5 5 5-5"/><path d="M4 20.5h16"/></svg><span>Llegadas</span></div>
+        <div class="tab" data-tab="enturnamiento">Llegadas Aeropuerto</div>
+        <div class="tab" data-tab="llegadas-almacentro-geo">Llegadas Almacentro</div>
+        <div class="tab" data-tab="llegadas-exposiciones-geo">Llegadas Exposiciones</div>
+        <div class="tab" data-tab="llegadas-terminalnorte-geo">Llegadas Terminal Norte</div>
+        <div class="tab hidden" data-tab="salidas-aeropuerto">Salidas Aeropuerto</div>
+      </div>
+      <div class="nav-group" data-grupo="flota">
+        <div class="nav-group-title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="14" rx="2.5"/><path d="M4 11h16M7.5 21v-3.5M16.5 21v-3.5"/><path d="M8 14.3h.01M16 14.3h.01"/></svg><span>Flota</span></div>
+        <div class="tab" data-tab="flota-documentos">Documentación Flota <span id="flotaDocTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
+        <div class="tab" data-tab="preop-sicov">Preoperacionales SICOV <span id="preopSicovTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
+      </div>
+      <div class="nav-group" data-grupo="conductores">
+        <div class="nav-group-title"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20.5c.8-3.6 3.4-5.6 6.5-5.6s5.7 2 6.5 5.6"/><path d="M15.5 4.6a3.5 3.5 0 0 1 0 6.8M18 15c1.8.8 3 2.7 3.5 5.5"/></svg><span>Conductores</span></div>
+        <div class="tab" data-tab="asistencias">Asistencias</div>
+        <div class="tab" data-tab="asistencia-biometrica">Asistencia biométrica</div>
+        <div class="tab" data-tab="conductores-csv">Conductores CSV</div>
+        <div class="tab" data-tab="conductor-documentos">Documentación Conductores <span id="conductorDocTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
+      </div>
+      <div class="nav-group" data-grupo="programacion">
+        <div class="nav-group-title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Programación</span></div>
+        <div class="tab" data-tab="programacion-filas">Programación de filas</div>
+        <div class="tab" data-tab="vista-excel">Programaciones Vista Excel</div>
+        <div class="tab" data-tab="cumplimiento">Cumplimiento</div>
+      </div>
+      <div class="nav-group" data-grupo="monitoreo">
+        <div class="nav-group-title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5M15 6.5V20"/></svg><span>Monitoreo</span></div>
+        <div class="tab active" data-tab="mapa-vehiculos">Mapa de vehículos</div>
+        <div class="tab" data-tab="despachos-sonar">Despachos Sonar</div>
+        <div class="tab" data-tab="vuelos">Vuelos MDE</div>
+        <div class="tab hidden" data-tab="vehiculos-sonar">Vehículos Sonar</div>
+        <div class="tab hidden" data-tab="tabla-vehiculossonar">Tabla vehículos Sonar</div>
+      </div>
+      <div class="nav-group" data-grupo="alertas">
+        <div class="nav-group-title"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 21.5 20h-19z"/><path d="M12 10v4.5M12 17.5h.01"/></svg><span>Alertas y auditoría</span></div>
+        <div class="tab" data-tab="alertas-gps">Alertas GPS <span id="gpsDescTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
+        <div class="tab" data-tab="alertas-despacho">Alertas despacho <span id="despAnomTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
+        <div class="tab" data-tab="auditoria-llegadas">Auditoría llegadas <span id="audLlegTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
+        <div class="tab" data-tab="auditoria-manual">Auditoría manual</div>
+      </div>
+    </nav>
+  </aside>
+  <div class="sidebar-scrim" id="sidebarScrim" aria-hidden="true"></div>
 
+  <div class="app-main">
+    <!-- BARRA SUPERIOR -->
+    <header class="topbar">
+      <button type="button" class="btn btn-ghost nav-toggle" id="btnNavToggle" aria-label="Abrir menú" aria-controls="appSidebar" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="page-head">
+        <div class="page-crumb" id="pageCrumb">Monitoreo</div>
+        <h1 class="page-title" id="pageTitle">Mapa de vehículos</h1>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-success" id="btnManualDispatch">Despacho manual</button>
+        <button class="btn btn-ghost" id="btnThemeToggle" title="Cambiar modo claro/oscuro" aria-label="Cambiar modo claro/oscuro">🌙</button>
+        <span class="pill app-version" id="appVersion" title="Versión de la aplicación (toca para buscar actualización)">v—</span>
+        <span class="pill user-chip" id="authUserLabel">No autenticado</span>
+        <button class="btn btn-danger hidden" id="btnLogout">Cerrar sesion</button>
+      </div>
+    </header>
 
+    <main class="app-content">
   <!-- ===================== OPERATIVO ===================== -->
   <div id="operativoPanel" class="card">
     <h2 id="operativoMainTitle">Panel de llegadas vehiculos</h2>
 
     <!-- Panel interno operativo -->
     <div id="operativoInner" class="layout">
-      
-      <!-- Columna izquierda: Pestanas -->
+
       <div class="card">
-        <div class="tabs">
-          <div class="tab hidden" data-tab="vehiculos-sonar">Vehiculos Sonar</div>
-          <div class="tab" data-tab="despachos-sonar">Despachos Sonar</div>
-          <div class="tab active" data-tab="mapa-vehiculos">Mapa vehiculos</div>
-          <div class="tab" data-tab="alertas-gps">Alertas GPS <span id="gpsDescTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
-          <div class="tab" data-tab="alertas-despacho">Alertas despacho <span id="despAnomTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
-          <div class="tab" data-tab="auditoria-llegadas">Auditoría llegadas <span id="audLlegTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
-          <div class="tab" data-tab="enturnamiento">Llegadas Aeropuerto</div>
-          <div class="tab" data-tab="llegadas-almacentro-geo">Llegadas Almacentro</div>
-          <div class="tab" data-tab="llegadas-exposiciones-geo">Llegadas Exposiciones</div>
-          <div class="tab" data-tab="llegadas-terminalnorte-geo">Llegadas Terminal Norte</div>
-          <div class="tab hidden" data-tab="salidas-aeropuerto">Salidas Aeropuerto</div>
-          <div class="tab" data-tab="auditoria-manual">Auditoría manual</div>
-          <div class="tab" data-tab="historial-despachos">Historial despachos</div>
-          <div class="tab" data-tab="planilla-despachos">Planilla Almacentro</div>
-          <div class="tab" data-tab="planilla-despachos-sandiego">Planilla CC San Diego</div>
-          <div class="tab" data-tab="planilla-despachos-expo">Planilla Exposiciones</div>
-          <div class="tab" data-tab="despachos-aeropuerto">Despachos Aeropuerto</div>
-          <div class="tab" data-tab="asistencia-biometrica">Asistencia biometrica</div>
-          <div class="tab" data-tab="conductores-csv">Conductores CSV</div>
-          <div class="tab" data-tab="preop-sicov">Preoperacionales SICOV</div>
-          <div class="tab" data-tab="programacion-filas">Programacion filas</div>
-          <div class="tab" data-tab="vista-excel">Programaciones Vista Excel</div>
-          <div class="tab" data-tab="cumplimiento">Cumplimiento</div>
-          <div class="tab" data-tab="vuelos">Vuelos MDE</div>
-          <div class="tab" data-tab="asistencias">Asistencias</div>
-          <div class="tab" data-tab="informe-flota">Informe Flota</div>
-          <div class="tab" data-tab="flota-documentos">Documentación Flota <span id="flotaDocTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
-          <div class="tab" data-tab="conductor-documentos">Documentación Conductores <span id="conductorDocTabBadge" style="display:none;background:#b91c1c;color:#fff;font-size:11px;font-weight:800;padding:1px 7px;border-radius:999px;margin-left:3px">0</span></div>
-          <div class="tab hidden" data-tab="tabla-vehiculossonar">Tabla vehiculossonar</div>
-        </div>
         <div class="mobile-tab-switcher" id="mobileTabSwitcher">
           <label for="mobileTabSelect">Seccion</label>
           <select id="mobileTabSelect" aria-label="Cambiar seccion"></select>
@@ -665,7 +696,7 @@ n" href="icons/icon-192.svg">
           <div class="row mobile-filters" style="margin-bottom:10px">
             <h3 style="margin:0">Preoperacionales SICOV</h3>
             <button class="btn btn-primary" id="btnRefreshPreopSicov">Actualizar</button>
-            <input id="preopSicovSearch" type="text" placeholder="Buscar interno, placa, conductor, documento..." />
+            <input id="preopSicovSearch" type="text" placeholder="Buscar interno, placa o conductor..." />
             <label class="muted" for="preopSicovFrom">Desde</label>
             <input id="preopSicovFrom" type="date" />
             <label class="muted" for="preopSicovTo">Hasta</label>
@@ -680,25 +711,25 @@ n" href="icons/icon-192.svg">
             <span class="muted" id="preopSicovStatus">Sin cargar</span>
           </div>
           <div class="muted" style="margin:0 0 10px 0">
-            Tabla de alistamientos SICOV, ordenada por fecha descendente. Cruza por interno con el mapeo de base.
+            Alistamientos registrados en la plataforma SICOV (uno por carro y día), del más reciente al más antiguo. Sin fechas muestra el día de hoy; máximo 2 meses por consulta.
           </div>
+          <div id="preopSicovResumen" class="sicov-resumen"></div>
           <div style="overflow:auto;max-height:62vh">
             <table id="preopSicovTable">
               <thead>
                 <tr>
-                  <th>Fecha/Hora</th>
+                  <th>Fecha</th>
                   <th>Interno</th>
                   <th>Placa</th>
-                  <th>Documento</th>
+                  <th>Ruta</th>
                   <th>Conductor</th>
                   <th>Estado</th>
-                  <th>SICOV id</th>
-                  <th>idAlistamiento</th>
-                  <th>Detalle</th>
+                  <th>Novedades / observaciones</th>
+                  <th style="text-align:right">Km</th>
                 </tr>
               </thead>
               <tbody id="preopSicovBody">
-                <tr><td colspan="9" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr>
+                <tr><td colspan="8" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr>
               </tbody>
             </table>
           </div>
@@ -945,39 +976,6 @@ n" href="icons/icon-192.svg">
           </div>
         </div>
 
-        <!-- Informe de gestión de flota: llegadas vs despachos por hora -->
-        <div id="tab-informe-flota" class="tab-content">
-          <div class="row mobile-filters" style="margin-bottom:10px">
-            <h3 style="margin:0">Informe de gestión de flota</h3>
-            <button class="btn btn-primary" id="iflRefresh">Actualizar</button>
-            <input id="iflFecha" type="date" />
-            <button class="btn btn-ghost" id="iflHoy">Hoy</button>
-            <button class="btn btn-ghost" id="iflDownload">Descargar Excel</button>
-            <span class="muted" id="iflStatus">Sin cargar</span>
-          </div>
-          <div class="muted" style="margin:0 0 10px 0">
-            Cruce por hora entre <b>llegadas del aeropuerto</b> (Airplan) y <b>despachos de subida</b> (buses enviados al aeropuerto). Demanda estimada = asientos × <b>82%</b> ocupación × <b>15%</b> captación; buses necesarios = ⌈pax / 19⌉. <b>Cobertura</b> = despachos ÷ buses necesarios. No cuentan las cancelaciones reales (canceladas en &lt;30 min); el CANCELADO por cierre de día sí cuenta.
-          </div>
-          <div id="iflResumen" class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:12px"></div>
-          <div style="overflow:auto;max-height:60vh">
-            <table class="ent-tabla" id="iflTabla">
-              <thead><tr>
-                <th>HORA</th><th>VUELOS LLEG.</th><th>ASIENTOS</th><th>PAX ESTIM.</th>
-                <th>BUSES NEC.</th><th>DESPACHOS SUBIDA</th><th>PAX TRANSP.</th><th>COBERTURA</th>
-              </tr></thead>
-              <tbody id="iflBody"><tr><td colspan="8" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr></tbody>
-            </table>
-          </div>
-          <h4 style="margin:16px 0 6px 0">Despachos por punto de despacho</h4>
-          <div class="muted" style="margin:0 0 8px 0">Distribución de <b>todos</b> los despachos del día (no solo aeropuerto) según el punto/itinerario de salida.</div>
-          <div style="overflow:auto;max-height:40vh">
-            <table class="ent-tabla" id="iflPuntoTabla">
-              <thead><tr><th>PUNTO DE DESPACHO</th><th>DESPACHOS</th><th>PAX TRANSP.</th><th>% DEL TOTAL</th></tr></thead>
-              <tbody id="iflPuntoBody"><tr><td colspan="4" class="muted" style="text-align:center;padding:12px">Sin datos.</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
         <!-- Contenido Documentación Flota -->
         <div id="tab-flota-documentos" class="tab-content">
           <div class="row mobile-filters" style="margin-bottom:10px">
@@ -1006,6 +1004,9 @@ n" href="icons/icon-192.svg">
             <span class="preop-pill preop-missing" id="flotaDocResumenVencidos">Vencidos: 0</span>
             <span class="preop-pill preop-error" id="flotaDocResumenPorVencer">Por vencer: 0</span>
           </div>
+          <!-- Alertas de documentos de la ruta 700 (se llena por JS) -->
+          <div id="flotaAlertaPanel" class="fa-panel"></div>
+          <div class="muted" style="margin:0 0 8px 0">Toca un estado de la tabla para ver o actualizar ese documento.</div>
           <div style="overflow:auto;max-height:62vh">
             <table id="flotaDocTable" class="ent-tabla">
               <thead>
@@ -1017,14 +1018,13 @@ n" href="icons/icon-192.svg">
                   <th>SOAT</th>
                   <th>Tecnomecánica</th>
                   <th>Tarjeta Operación</th>
-                  <th>Mant. Preventivo</th>
                   <th>Certificación Amparo</th>
-                  <th>Licencia Tránsito</th>
+                  <th>Tarjeta Propiedad</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody id="flotaDocBody">
-                <tr><td colspan="11" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr>
+                <tr><td colspan="10" class="muted" style="text-align:center;padding:12px">Sin datos. Pulsa Actualizar.</td></tr>
               </tbody>
             </table>
           </div>
@@ -1070,6 +1070,8 @@ n" href="icons/icon-192.svg">
 
       </div>
     </div>
+  </div>
+    </main>
   </div>
 </div>
 <div id="appToast" class="toast" aria-live="polite"></div>
@@ -1118,7 +1120,7 @@ n" href="icons/icon-192.svg">
     <h3 id="flotaDocModalTitle" class="modal-title">Documentación del vehículo</h3>
     <div class="modal-sub" id="flotaDocModalSub">-</div>
     <div id="flotaDocModalSections" style="margin-top:10px;display:flex;flex-direction:column;gap:14px;overflow-y:auto;min-height:0;flex:1 1 auto">
-      <!-- Se llenan por JS: SOAT, Tecnomecanica, Tarjeta Operacion, Certificacion Amparo, Licencia Transito + Mantenimiento Preventivo (con historial cada 2 meses) -->
+      <!-- Se llenan por JS: SOAT, Tecnomecanica, Tarjeta Operacion, Certificacion Amparo, Tarjeta de Propiedad y, al final, Mantenimiento Preventivo (con historial cada 2 meses; no cuenta como documento) -->
     </div>
     <div class="modal-actions" style="margin-top:12px;flex:0 0 auto">
       <button class="btn btn-ghost" id="flotaDocModalCerrar">Cerrar</button>
@@ -1135,6 +1137,25 @@ n" href="icons/icon-192.svg">
     <div class="modal-actions" style="margin-top:12px;flex:0 0 auto">
       <button class="btn btn-ghost" id="conductorDocModalCerrar">Cerrar</button>
     </div>
+  </div>
+</div>
+<!-- Visor de documentos adjuntos (PDF / foto) -->
+<div id="docViewerModal" class="modal-backdrop doc-viewer-modal hidden" role="dialog" aria-modal="true" aria-labelledby="docViewerTitle">
+  <div class="modal-card doc-viewer-card">
+    <div class="doc-viewer-head">
+      <div style="min-width:0">
+        <h3 id="docViewerTitle" class="modal-title">Documento</h3>
+        <div class="modal-sub" id="docViewerSub">-</div>
+      </div>
+      <div class="doc-viewer-actions">
+        <button type="button" class="btn btn-ghost btn-sm hidden" id="docViewerRotate" title="Girar la foto 90°">⟳ Girar</button>
+        <button type="button" class="btn btn-ghost btn-sm hidden" id="docViewerZoom" title="Ver la foto a tamaño real">🔍 Ampliar</button>
+        <a class="btn btn-ghost btn-sm disabled" id="docViewerOpen" target="_blank" rel="noopener">Abrir en pestaña</a>
+        <a class="btn btn-ghost btn-sm disabled" id="docViewerDownload">Descargar</a>
+        <button type="button" class="btn btn-primary btn-sm" id="docViewerClose">Cerrar</button>
+      </div>
+    </div>
+    <div id="docViewerBody" class="doc-viewer-body"></div>
   </div>
 </div>
 <div id="noteModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="noteModalTitle">
@@ -1407,9 +1428,10 @@ n" href="icons/icon-192.svg">
   <div id="mapaFloatingBody"></div>
 </div>
 
-<script src="js/functions.js?v=1.17.1"></script>
-<script src="js/main.js?v=1.17.1"></script>
-<script src="js/pwa.js?v=1.17.1"></script>
+<script src="js/functions.js?v=1.18.1"></script>
+<script src="js/main.js?v=1.18.1"></script>
+<script src="js/pwa.js?v=1.18.1"></script>
+<script src="js/shell.js?v=1.18.1"></script>
 <script>
   // Interruptor de tema claro/oscuro (persistente en localStorage).
   (function(){

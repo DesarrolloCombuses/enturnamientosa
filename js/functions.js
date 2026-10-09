@@ -1818,8 +1818,12 @@ let preopSicovSearchTimer = null;
 let preopSicovDespachos = [];     // despachos del dia consultado (solo cuando es un dia)
 let preopSicovAlertaTimer = null;
 let preopSicovTrabajandoHoy = []; // carros despachados hoy sin alistamiento (ultima revision)
+let preopSicovRevisadoEn = 0;     // hora de la ultima revision que salio bien
+let preopSicovRevisando = false;
 const DESPACHO_CANCELACION_REAL_MIN = 30;
-const PREOP_ALERTA_POLL_MS = 5 * 60 * 1000;
+// El conductor hace el alistamiento cuando ya tiene despachos: el aviso debe borrarlo pronto.
+const PREOP_ALERTA_POLL_MS = 2 * 60 * 1000;
+const PREOP_ALERTA_AL_VOLVER_MS = 60 * 1000;
 const PREOP_ALERTA_SNOOZE_MIN = 60;
 const PREOP_ALERTA_SNOOZE_LS = "combuses_preop_sicov_snooze";
 
@@ -1949,7 +1953,7 @@ function renderPreopAlertaFlotante(){
       <button type="button" class="fa-flotante-x" data-preop-accion="posponer" title="Posponer ${PREOP_ALERTA_SNOOZE_MIN} min" aria-label="Posponer aviso">✕</button>
     </div>
     <div class="fa-flotante-body">
-      <div class="fa-flotante-resumen">${lista.length === 1 ? "1 carro despachado" : `${lista.length} carros despachados`} hoy sin alistamiento</div>
+      <div class="fa-flotante-resumen">${lista.length === 1 ? "1 carro despachado" : `${lista.length} carros despachados`} hoy sin alistamiento${preopSicovRevisadoEn ? ` · revisado ${escapeHtml(horaMinCO(preopSicovRevisadoEn))}` : ""}</div>
       <ul class="fa-lista">${items}</ul>
       ${mas}
       <div class="fa-flotante-acciones">
@@ -1959,17 +1963,29 @@ function renderPreopAlertaFlotante(){
     </div>`;
 }
 
-// Vigilancia en segundo plano (desde el login, cada 5 min): el contador del menu y el aviso
-// flotante dicen cuantos carros de la ruta 700 estan despachando hoy sin alistamiento SICOV.
+// Vigilancia en segundo plano (desde el login, cada 2 min y al volver a la ventana): el
+// contador del menu y el aviso flotante dicen cuantos carros de la ruta 700 estan despachando
+// hoy sin alistamiento SICOV.
 async function revisarPendientesSicovHoy(){
-  if (!currentUserId) return;
+  if (!currentUserId || preopSicovRevisando) return;
+  preopSicovRevisando = true;
   const hoy = fechaBogotaISO();
   try {
     const datos = await consultarDatosSicov(hoy, hoy);
+    preopSicovRevisadoEn = Date.now();
     setPreopSicovTabBadge(calcularPendientesSicov(datos.alistamientos, datos.flota700, datos.despachos).trabajando);
   } catch (err) {
     console.warn("[sicov] revision de pendientes fallo:", err);
+  } finally {
+    preopSicovRevisando = false;
   }
+}
+
+// Con la ventana oculta no se revisa; al volver, el aviso puede traer carros que ya hicieron
+// el alistamiento mientras tanto.
+function revisarPendientesSicovAlVolver(){
+  if (document.hidden || !preopSicovAlertaTimer) return;
+  if (Date.now() - preopSicovRevisadoEn > PREOP_ALERTA_AL_VOLVER_MS) revisarPendientesSicovHoy();
 }
 
 function ensurePreopSicovAlertaGlobal(){
@@ -1978,10 +1994,15 @@ function ensurePreopSicovAlertaGlobal(){
   preopSicovAlertaTimer = setInterval(() => {
     if (!document.hidden) revisarPendientesSicovHoy();
   }, PREOP_ALERTA_POLL_MS);
+  document.addEventListener("visibilitychange", revisarPendientesSicovAlVolver);
+  window.addEventListener("focus", revisarPendientesSicovAlVolver);
 }
 
 function detenerPreopSicovAlertaGlobal(){
   if (preopSicovAlertaTimer) { clearInterval(preopSicovAlertaTimer); preopSicovAlertaTimer = null; }
+  document.removeEventListener("visibilitychange", revisarPendientesSicovAlVolver);
+  window.removeEventListener("focus", revisarPendientesSicovAlVolver);
+  preopSicovRevisadoEn = 0;
   setPreopSicovTabBadge([]);
 }
 
@@ -2012,6 +2033,7 @@ async function loadPreoperacionalesSicov(){
     preopSicovDespachos = datos.despachos;
     preopSicovRango = rango;
     if (rango.desde === rango.hasta && rango.desde === fechaBogotaISO()) {
+      preopSicovRevisadoEn = Date.now();
       setPreopSicovTabBadge(calcularPendientesSicov(datos.alistamientos, datos.flota700, datos.despachos).trabajando);
     }
     preopSicovCurrentPage = 1;
